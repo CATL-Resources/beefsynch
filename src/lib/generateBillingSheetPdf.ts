@@ -88,7 +88,7 @@ export function generateBillingSheetPdf(
 
   /* ── Products & Services ── */
   const visibleProducts = products.filter(
-    (p: any) => (p.doses > 0) || ((p.line_total ?? 0) > 0)
+    (p: any) => (p.doses > 0) || ((p.line_total ?? 0) > 0) || ((p.units_billed ?? 0) > 0)
   );
 
   if (visibleProducts.length > 0) {
@@ -105,16 +105,22 @@ export function generateBillingSheetPdf(
       const dpu = p.doses_per_unit;
       const units = dpu && dpu > 0 ? (p.doses / dpu).toFixed(1) : null;
       const unitsStr = units ? `${units} ${p.unit_label || ""}`.trim() : "";
-      const qtyStr = [
-        p.doses ? `${p.doses} hd` : "",
-        unitsStr,
-      ].filter(Boolean).join(" \u00B7 ");
+      const unitsBilled = p.units_billed ?? 0;
+      let qtyStr: string;
+      if (p.doses > 0) {
+        qtyStr = [`${p.doses} hd`, unitsStr].filter(Boolean).join(" \u00B7 ");
+      } else if (unitsBilled > 0) {
+        qtyStr = `${unitsBilled} units`;
+      } else {
+        qtyStr = "\u2014";
+      }
+      const lineTotal = parseFloat(p.line_total ?? 0) || 0;
 
       return [
         label,
         { content: qtyStr, styles: { halign: "right" as const } },
         { content: p.unit_price ? formatDollar(p.unit_price) : "\u2014", styles: { halign: "right" as const } },
-        { content: formatDollar(p.line_total), styles: { halign: "right" as const, fontStyle: "bold" as const } },
+        { content: formatDollar(lineTotal), styles: { halign: "right" as const, fontStyle: "bold" as const } },
       ];
     });
 
