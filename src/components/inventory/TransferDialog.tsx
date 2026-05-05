@@ -44,6 +44,7 @@ interface TransferDialogProps {
   tankId: string;
   defaultCustomerId?: string;
   defaultCustomerName?: string;
+  initialMode?: "transfer" | "withdraw";
   onSuccess?: () => void;
 }
 
@@ -57,6 +58,7 @@ export default function TransferDialog({
   tankId,
   defaultCustomerId,
   defaultCustomerName,
+  initialMode = "transfer",
   onSuccess,
 }: TransferDialogProps) {
   const queryClient = useQueryClient();
@@ -92,10 +94,10 @@ export default function TransferDialog({
       setNote("");
       // Auto-billable when company stock → customer (no source customer, customer assigned)
       setIsBillable(!!initialCustomer && !sourceRow.customer_id);
-      setMode("transfer");
+      setMode(initialMode);
       setReason("");
     }
-  }, [open, sourceRow, defaultCustomerId]);
+  }, [open, sourceRow, defaultCustomerId, initialMode]);
 
   const { data: tanks = [] } = useQuery({
     queryKey: ["transfer_dialog_tanks", orgId],

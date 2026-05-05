@@ -12,6 +12,8 @@ import StatCard from "@/components/StatCard";
 import TableSkeleton from "@/components/TableSkeleton";
 import EmptyState from "@/components/EmptyState";
 import TankMap from "@/components/inventory/TankMap";
+import TransferDialog from "@/components/inventory/TransferDialog";
+import { useOrgRole } from "@/hooks/useOrgRole";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +64,10 @@ interface InventoryTabProps {
 const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: InventoryTabProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { userId } = useOrgRole();
+  const [transferRow, setTransferRow] = useState<any>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferMode, setTransferMode] = useState<"transfer" | "withdraw">("transfer");
   const [search, setSearch] = useState("");
   const [storageFilter, setStorageFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState<string>(initialOwnerFilter);
@@ -621,6 +627,24 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={() => openEdit(row)}>Edit</DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTransferRow(row._raw);
+                                    setTransferMode("transfer");
+                                    setTransferOpen(true);
+                                  }}
+                                >
+                                  Transfer
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTransferRow(row._raw);
+                                    setTransferMode("withdraw");
+                                    setTransferOpen(true);
+                                  }}
+                                >
+                                  Withdraw
+                                </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="text-destructive focus:text-destructive"
@@ -699,6 +723,24 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={() => openEdit(row)}>Edit</DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTransferRow(row._raw);
+                                    setTransferMode("transfer");
+                                    setTransferOpen(true);
+                                  }}
+                                >
+                                  Transfer
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTransferRow(row._raw);
+                                    setTransferMode("withdraw");
+                                    setTransferOpen(true);
+                                  }}
+                                >
+                                  Withdraw
+                                </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="text-destructive focus:text-destructive"
@@ -961,6 +1003,20 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
           bullCatalogId={editBullId}
         />
       )}
+
+      <TransferDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        sourceRow={transferRow}
+        sourceTankName={transferRow?.tanks?.tank_name || transferRow?.tanks?.tank_number || "Tank"}
+        orgId={orgId}
+        userId={userId}
+        tankId={transferRow?.tank_id || ""}
+        initialMode={transferMode}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["semen-inventory"] });
+        }}
+      />
     </div>
   );
 };
