@@ -169,8 +169,12 @@ const Customers = () => {
       setDialogOpen(false);
       resetForm();
     },
-    onError: () => {
-      toast({ title: "Error", description: "Could not save customer.", variant: "destructive" });
+    onError: (error: any) => {
+      const isDuplicate = error?.code === "23505" || error?.status === 409;
+      const description = isDuplicate
+        ? "A customer with this name already exists."
+        : error?.message || "Could not save customer.";
+      toast({ title: "Error", description, variant: "destructive" });
     },
   });
 

@@ -227,7 +227,13 @@ export const CustomersTab = ({ orgId }: { orgId: string }) => {
       if (error) throw error;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customers"] }); toast({ title: "Customer added" }); setDialogOpen(false); resetForm(); },
-    onError: () => { toast({ title: "Error", description: "Could not save customer.", variant: "destructive" }); },
+    onError: (error: any) => {
+      const isDuplicate = error?.code === "23505" || error?.status === 409;
+      const description = isDuplicate
+        ? "A customer with this name already exists."
+        : error?.message || "Could not save customer.";
+      toast({ title: "Error", description, variant: "destructive" });
+    },
   });
 
   const resetForm = () => { setFormName(""); setFormPhone(""); setFormEmail(""); setFormAddress(""); setFormNotes(""); };
