@@ -421,7 +421,7 @@ const ReceiveShipment = () => {
           groupId: dl.groupId || crypto.randomUUID(),
           bullName: dl.bullName || "",
           bullCatalogId: dl.bullCatalogId || null,
-          units: dl.units || 0,
+          units: dl.units || "",
           tankId: dl.tankId || "",
           canister: dl.canister || "",
           itemType: dl.itemType || "semen",
@@ -926,7 +926,7 @@ const ReceiveShipment = () => {
     const key = line.bullCatalogId || line.bullName;
     if (!key) return "";
     const qty = orderedQtyMap.get(key);
-    return qty != null ? `of ${qty}` : "";
+    return qty != null ? String(qty) : "";
   };
 
   const renderAllocationBadge = (group: BullGroup) => {
