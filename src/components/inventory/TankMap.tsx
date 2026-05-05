@@ -33,6 +33,8 @@ type TankWithCanisters = {
   id: string;
   name: string;
   number: string;
+  tankType: string;
+  customerName: string | null;
   nitrogenStatus: string;
   locationStatus: string;
   totalCanisters: number | null;
@@ -43,9 +45,19 @@ type TankWithCanisters = {
 };
 
 type FilterMode = "all" | "wet_only" | "has_open_slots";
+type TypeFilter = "all" | "inventory_tank" | "communal_tank" | "rental_tank" | "customer_tank";
+
+const TYPE_FILTER_OPTIONS: Array<{ value: TypeFilter; label: string }> = [
+  { value: "all", label: "All types" },
+  { value: "inventory_tank", label: "Inventory" },
+  { value: "communal_tank", label: "Communal" },
+  { value: "rental_tank", label: "Rental" },
+  { value: "customer_tank", label: "Customer" },
+];
 
 export default function TankMap({ orgId }: { orgId: string }) {
   const [filter, setFilter] = useState<FilterMode>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [expanded, setExpanded] = useState<string | null>(null); // format: "tankId:canister"
 
   const { data, isLoading } = useQuery({
@@ -53,17 +65,14 @@ export default function TankMap({ orgId }: { orgId: string }) {
     enabled: !!orgId,
     staleTime: 30_000,
     queryFn: async () => {
-      // Tanks: company-owned inventory + communal only.
-      // Cast to any because the generated types.ts doesn't yet know about
-      // total_canisters / canister_capacity columns (added server-side).
+      // All tanks at this location (not out in the field).
       const { data: tanks, error: tErr } = await supabase
         .from("tanks")
         .select(
-          "id, tank_name, tank_number, tank_type, nitrogen_status, location_status, total_canisters, canister_capacity"
+          "id, tank_name, tank_number, tank_type, nitrogen_status, location_status, total_canisters, canister_capacity, customer_id, customers!tanks_customer_id_fkey(name)"
         )
         .eq("organization_id", orgId)
-        .is("customer_id", null)
-        .in("tank_type", ["inventory_tank", "communal_tank"])
+        .eq("location_status", "here")
         .order("tank_number");
       if (tErr) throw tErr;
 
@@ -128,6 +137,8 @@ export default function TankMap({ orgId }: { orgId: string }) {
         id: t.id,
         name: t.tank_name || "—",
         number: t.tank_number || "—",
+        tankType: t.tank_type || "",
+        customerName: t.customers?.name ?? null,
         nitrogenStatus: t.nitrogen_status || "unknown",
         locationStatus: t.location_status || "here",
         totalCanisters: t.total_canisters ?? null,
@@ -141,6 +152,9 @@ export default function TankMap({ orgId }: { orgId: string }) {
 
   const filtered = useMemo(() => {
     return tanksWithCanisters.filter((t) => {
+      // Hide empty tanks (freeze branding, mushroom, empty shippers, etc.)
+      if (t.totalUnits === 0) return false;
+      if (typeFilter !== "all" && t.tankType !== typeFilter) return false;
       if (filter === "wet_only" && t.nitrogenStatus !== "wet") return false;
       if (filter === "has_open_slots") {
         const totalSlots = t.totalCanisters ?? Math.max(t.maxCanisterSeen, 6);
@@ -148,7 +162,7 @@ export default function TankMap({ orgId }: { orgId: string }) {
       }
       return true;
     });
-  }, [tanksWithCanisters, filter]);
+  }, [tanksWithCanisters, filter, typeFilter]);
 
   const totalOpenSlots = useMemo(() => {
     return tanksWithCanisters.reduce((sum, t) => {
@@ -221,7 +235,7 @@ export default function TankMap({ orgId }: { orgId: string }) {
       <EmptyState
         icon={MapPin}
         title="No tanks to map"
-        description="No company inventory or communal tanks match the current filter."
+        description="No tanks with inventory match the current filter."
       />
     );
   }
@@ -247,6 +261,16 @@ export default function TankMap({ orgId }: { orgId: string }) {
             <Printer className="h-4 w-4 mr-1.5" />
             {printingAll ? "Generating…" : `Print all (${filtered.length})`}
           </Button>
+          <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as TypeFilter)}>
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TYPE_FILTER_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={filter} onValueChange={(v) => setFilter(v as FilterMode)}>
             <SelectTrigger className="w-[200px] h-9">
               <SelectValue />
@@ -365,6 +389,11 @@ function TankCard({
               <div className="text-xs text-muted-foreground group-hover:text-primary/80 transition-colors">
                 #{tank.number} →
               </div>
+              {tank.customerName && (
+                <div className="text-xs text-muted-foreground truncate" title={tank.customerName}>
+                  {tank.customerName}
+                </div>
+              )}
             </Link>
             <Button
               variant="outline"
