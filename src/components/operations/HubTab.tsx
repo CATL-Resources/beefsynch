@@ -35,6 +35,7 @@ interface UpcomingProject {
   has_labor: boolean;
   billing_status: "none" | "started" | "complete";
   product_summary: string;
+  in_process: boolean;
 }
 
 interface ActionCounts {
@@ -128,6 +129,23 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           }
         }
 
+        // Fetch protocol events to determine "in process" status
+        const inProcessSet = new Set<string>();
+        if (projIds.length > 0) {
+          const day7 = format(addDays(new Date(), 7), "yyyy-MM-dd");
+          const { data: eventDates } = await supabase
+            .from("protocol_events")
+            .select("project_id, event_date, event_name")
+            .in("project_id", projIds)
+            .not("event_name", "in", '("Return Heat","Estimated Calving")')
+            .lte("event_date", day7);
+          if (eventDates) {
+            for (const ev of eventDates) {
+              inProcessSet.add(ev.project_id);
+            }
+          }
+        }
+
         // Fetch billing summary for each project
         const billingMap = new Map<string, { products_delivered: number; products_total: number; has_labor: boolean; billing_status: string; product_summary: string }>();
         if (projIds.length > 0) {
@@ -142,7 +160,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             // Products
             const { data: prodData } = await supabase
               .from("project_billing_products")
-              .select("billing_id, delivery_method, doses, units_billed")
+              .select("billing_id, product_name, unit_label, delivery_method, doses, units_billed")
               .in("billing_id", billingIds);
 
             // Labor
@@ -157,16 +175,19 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
               const hasValues = prods.filter(p => (p.doses ?? 0) > 0 || (Number(p.units_billed) ?? 0) > 0);
               const hasLabor = (laborData ?? []).some(l => l.billing_id === bill.id);
 
-              // Build delivery summary like "3 pickup, 1 we gave"
-              const methodCounts: Record<string, number> = {};
+              // Build product summary like "2 bottle SynchSure (50 Dose), 19 bag CIDR"
+              const summaryParts: string[] = [];
               for (const p of delivered) {
-                const label = p.delivery_method === "pickup" ? "pickup"
-                  : p.delivery_method === "we_gave" ? "we gave"
-                  : p.delivery_method === "drop_off" ? "drop off"
-                  : "";
-                if (label) methodCounts[label] = (methodCounts[label] || 0) + 1;
+                const qty = (Number(p.units_billed) ?? 0) > 0
+                  ? `${p.units_billed} ${p.unit_label || ""}`.trim()
+                  : (p.doses ?? 0) > 0 ? `${p.doses} hd` : "";
+                if (qty && p.product_name) {
+                  summaryParts.push(`${qty} ${p.product_name}`);
+                } else if (p.product_name) {
+                  summaryParts.push(p.product_name);
+                }
               }
-              const summary = Object.entries(methodCounts).map(([k, v]) => `${v} ${k}`).join(", ");
+              const summary = summaryParts.join(", ");
 
               let status: "none" | "started" | "complete" = "none";
               if (bill.billing_completed_at) status = "complete";
@@ -197,6 +218,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             has_labor: billing?.has_labor ?? false,
             billing_status: (billing?.billing_status ?? "none") as "none" | "started" | "complete",
             product_summary: billing?.product_summary ?? "",
+            in_process: inProcessSet.has(p.id),
           });
         }
       }
@@ -737,6 +759,9 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold text-base truncate">{p.name}</h3>
                         <Badge variant="outline" className="text-[10px]">{p.status}</Badge>
+                        {p.in_process && (
+                          <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px] py-0 px-1.5">In Process</Badge>
+                        )}
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                         <span>{format(parseISO(p.breeding_date), "EEE, MMM d")}</span>
@@ -752,24 +777,21 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                           {p.bull_names.join(", ")}
                         </p>
                       )}
-                      {/* Billing status strip */}
-                      {p.billing_status !== "none" && (
-                        <div className="mt-1.5 flex items-center gap-2 text-[11px] flex-wrap">
-                          {p.products_delivered > 0 && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700">
-                              <Package className="h-3 w-3" />
-                              {p.product_summary}
-                            </span>
+                      {/* Product + labor summary strip */}
+                      {(p.product_summary || p.has_labor) && (
+                        <div className="mt-1.5 flex flex-col gap-1 text-[11px]">
+                          {p.product_summary && (
+                            <p className="text-emerald-700 leading-snug">{p.product_summary}</p>
                           )}
                           {p.has_labor && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700">
+                            <span className="inline-flex items-center gap-1 text-blue-700 w-fit">
                               Labor entered
                             </span>
                           )}
                         </div>
                       )}
-                      {p.billing_status === "none" && p.products_total === 0 && (
-                        <p className="mt-1 text-[11px] text-muted-foreground/60 italic">No billing started</p>
+                      {p.in_process && !p.product_summary && !p.has_labor && (
+                        <p className="mt-1 text-[11px] text-muted-foreground/60 italic">Synch started — no products delivered yet</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -880,8 +902,11 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                       {p.bull_names.length > 0 && (
                         <span className="text-primary/80 truncate max-w-[150px]">{p.bull_names.join(", ")}</span>
                       )}
+                      {p.in_process && (
+                        <span className="text-[10px] font-medium text-primary">In Process</span>
+                      )}
                       {p.products_delivered > 0 && (
-                        <span className="text-[10px] text-emerald-600">{p.product_summary}</span>
+                        <span className="text-[10px] text-emerald-600 truncate max-w-[200px]">{p.product_summary}</span>
                       )}
                       <span>{p.head_count} hd</span>
                       <span>·</span>

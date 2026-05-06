@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addDays } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import {
   addFooterToPdf,
@@ -22,11 +22,14 @@ function deliveryLabel(dm: string | null): string {
 }
 
 /**
- * Generate an operations summary PDF for all in-process projects.
- * Each project gets a block with: header, products with delivery status,
- * bull/semen needs, pack status, labor notes.
+ * Generate an operations summary PDF for all IN-PROCESS projects.
+ * "In process" = has any protocol event (excluding Return Heat / Estimated Calving)
+ * dated on or before 7 days from now. Projects whose synch is entirely in the
+ * future (e.g. June+) are excluded.
  */
 export async function generateOperationsSummaryPdf(orgId: string) {
+  const day7 = format(addDays(new Date(), 7), "yyyy-MM-dd");
+
   const { data: projects } = await supabase
     .from("projects")
     .select("id, name, breeding_date, head_count, status, cattle_type, protocol, customer_id, customers!projects_customer_id_fkey(name)")
@@ -38,6 +41,24 @@ export async function generateOperationsSummaryPdf(orgId: string) {
 
   const projIds = projects.map(p => p.id);
 
+  // Filter to projects where at least one billable protocol event is at or before day7.
+  const { data: allEvents } = await supabase
+    .from("protocol_events")
+    .select("project_id, event_date, event_name")
+    .in("project_id", projIds)
+    .not("event_name", "in", '("Return Heat","Estimated Calving")')
+    .lte("event_date", day7);
+
+  const inProcessIds = new Set<string>();
+  for (const ev of (allEvents ?? [])) {
+    if (ev.project_id) inProcessIds.add(ev.project_id);
+  }
+
+  const inProcessProjects = projects.filter(p => inProcessIds.has(p.id));
+  if (inProcessProjects.length === 0) return;
+
+  const activeIds = inProcessProjects.map(p => p.id);
+
   const [
     { data: packLinks },
     { data: bullsData },
@@ -45,13 +66,13 @@ export async function generateOperationsSummaryPdf(orgId: string) {
   ] = await Promise.all([
     supabase.from("tank_pack_projects")
       .select("project_id, tank_pack_id, tank_packs(id, status, field_tank_id, tanks:field_tank_id(tank_name, tank_number), tank_pack_lines(bull_name, bull_code, field_canister, units))")
-      .in("project_id", projIds),
+      .in("project_id", activeIds),
     supabase.from("project_bulls")
       .select("project_id, units, bull_catalog_id, custom_bull_name, bulls_catalog(bull_name, naab_code)")
-      .in("project_id", projIds),
+      .in("project_id", activeIds),
     supabase.from("project_billing")
       .select("id, project_id, billing_completed_at")
-      .in("project_id", projIds),
+      .in("project_id", activeIds),
   ]);
 
   const billingIds = (billingData ?? []).map(b => b.id);
@@ -93,7 +114,7 @@ export async function generateOperationsSummaryPdf(orgId: string) {
   const m = 12;
   let isFirstProject = true;
 
-  for (const proj of projects) {
+  for (const proj of inProcessProjects) {
     if (!isFirstProject) {
       const currentY = (doc as any)._currentY || m;
       if (currentY > ph - 80) doc.addPage();
