@@ -871,13 +871,27 @@ const ProjectBilling = () => {
     if (!project) return;
     const firstPack = projectPacks[0] || null;
 
-    // Filter to breeding-only sessions for the session detail grid
+    // ── Authoritative packed totals from tank_pack_lines ──
+    // These are the REAL packed amounts. project_bulls.units is a planning number and may be stale.
+    const packLineMap = new Map<string, { bull_name: string; bull_code: string | null; packed: number }>();
+    // We can derive this from sessionInventory which was already loaded from pack lines,
+    // or from semenLines which syncs from pack lines.
+    // semenLines.units_packed is synced from tank_pack_lines and is authoritative.
+    const packLineTotals = semenLines
+      .filter(sl => (sl.units_packed ?? 0) > 0)
+      .map(sl => ({
+        bull_name: sl.bull_name,
+        bull_code: sl.bull_code,
+        packed: sl.units_packed ?? 0,
+      }));
+
+    // ── Breeding sessions only ──
     const breedOnly = sessions.filter(s => {
       const label = (s.session_label || "").toLowerCase();
       return label.includes("breed") || label.includes("ai ") || label === "ai";
     }).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.session_date.localeCompare(b.session_date));
 
-    // Build per-bull/canister session detail rows from sessionInventory
+    // ── Per-bull/canister session detail rows ──
     const bullCanisterMap = new Map<string, {
       bull_name: string; bull_code: string | null; canister: string; packed: number;
       sessions: Record<number, { start: number | null; end: number | null }>;
@@ -887,11 +901,6 @@ const ProjectBilling = () => {
     for (const inv of sessionInventory) {
       const key = `${inv.bull_catalog_id || inv.bull_name}|${inv.canister}`;
       if (!bullCanisterMap.has(key)) {
-        // Get packed from semenLines (aggregated) or from the inventory row
-        const semenLine = semenLines.find(sl =>
-          (sl.bull_catalog_id && sl.bull_catalog_id === inv.bull_catalog_id) ||
-          sl.bull_name === inv.bull_name
-        );
         bullCanisterMap.set(key, {
           bull_name: inv.bull_name,
           bull_code: inv.bull_code,
@@ -902,19 +911,17 @@ const ProjectBilling = () => {
         });
       }
       const entry = bullCanisterMap.get(key)!;
-      // Map session_id to its index in breedOnly
       const sessIdx = breedOnly.findIndex(s => s.id === inv.session_id);
       if (sessIdx >= 0) {
         entry.sessions[sessIdx] = { start: inv.start_units, end: inv.end_units };
       }
-      // Take the max returned and packed we see
       if (inv.returned_units != null) entry.returned = Math.max(entry.returned ?? 0, inv.returned_units);
     }
 
-    // Fill packed from semenLines or pack_lines
+    // Fill per-canister packed from semenLines (total per bull, not per canister — best we have)
     for (const [, entry] of bullCanisterMap) {
       const sl = semenLines.find(s =>
-        s.bull_name === entry.bull_name || (s.bull_catalog_id && s.bull_code === entry.bull_code)
+        s.bull_name === entry.bull_name || (s.bull_code && s.bull_code === entry.bull_code)
       );
       if (sl?.units_packed) entry.packed = sl.units_packed;
     }
@@ -939,6 +946,7 @@ const ProjectBilling = () => {
         sort_order: s.sort_order,
       })),
       sessionDetails: sessionDetailRows,
+      packLineTotals,
     });
     toast({ title: "Breeding worksheet downloaded" });
   }
