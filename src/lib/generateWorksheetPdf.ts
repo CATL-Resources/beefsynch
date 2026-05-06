@@ -98,12 +98,14 @@ export function generateWorksheetPdf(
     sessionDetails?: SessionDetail[];
     /** Per-canister rows from tank_pack_lines — authoritative for packed amounts */
     packLines?: PackLineRow[];
+    laborEntries?: { description: string; labor_dates: string | null }[];
   },
 ) {
   const semenLines = extra?.semenLines ?? [];
   const breedingSessions = extra?.breedingSessions ?? [];
   const sessionDetails = extra?.sessionDetails ?? [];
   const packLines = extra?.packLines ?? [];
+  const laborEntries = extra?.laborEntries ?? [];
 
   // Filter events
   const filteredEvents = events.filter(
@@ -367,6 +369,33 @@ export function generateWorksheetPdf(
       }
     },
   });
+
+  y = (doc as any).lastAutoTable.finalY + 6;
+
+  /* -- Labor -- */
+  if (laborEntries.length > 0) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Labor", m, y);
+
+    const laborBody = laborEntries.map(l => [
+      l.labor_dates || "",
+      l.description || "",
+    ]);
+
+    autoTable(doc, {
+      startY: y + 2,
+      margin: { left: m, right: m },
+      head: [["Date", "Description"]],
+      body: laborBody,
+      styles: { fontSize: 9, cellPadding: 2, lineColor: [60, 60, 60], lineWidth: 0.15 },
+      headStyles: { ...getStandardHeadStylesDark(), fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 30 },
+        1: { cellWidth: "auto" },
+      },
+    });
+  }
 
   /* ================================================================
    * PAGE 2 — LANDSCAPE — Session detail + notes
