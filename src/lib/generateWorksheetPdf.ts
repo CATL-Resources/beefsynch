@@ -23,6 +23,13 @@ interface SemenSummary {
   units_billable: number | null;
 }
 
+interface PackLineRow {
+  bull_name: string;
+  bull_code: string | null;
+  canister: string;
+  packed: number;
+}
+
 interface SessionDetail {
   bull_name: string;
   bull_code: string | null;
@@ -55,7 +62,10 @@ function bullLabel(name: string, code: string | null | undefined): string {
 
 /** Compact time: "7:00a" instead of "7:00 AM" */
 function compactTime(time: string): string {
-  const [h, m] = time.split(":").map(Number);
+  const parts = time.split(":");
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return time;
   const ampm = h >= 12 ? "p" : "a";
   const hour = h % 12 || 12;
   return `${hour}:${String(m).padStart(2, "0")}${ampm}`;
@@ -86,20 +96,26 @@ export function generateWorksheetPdf(
     semenLines?: SemenSummary[];
     breedingSessions?: BreedingSession[];
     sessionDetails?: SessionDetail[];
-    /** Actual packed totals per bull from tank_pack_lines — always authoritative */
-    packLineTotals?: { bull_name: string; bull_code: string | null; packed: number }[];
+    /** Per-canister rows from tank_pack_lines — authoritative for packed amounts */
+    packLines?: PackLineRow[];
   },
 ) {
   const semenLines = extra?.semenLines ?? [];
   const breedingSessions = extra?.breedingSessions ?? [];
   const sessionDetails = extra?.sessionDetails ?? [];
-  const packLineTotals = extra?.packLineTotals ?? [];
-  const hasEnhancedData = semenLines.length > 0 || packLineTotals.length > 0;
+  const packLines = extra?.packLines ?? [];
 
   // Filter events
   const filteredEvents = events.filter(
     (ev: any) => !EXCLUDED_EVENTS.includes(ev.event_name?.trim())
   );
+
+  // Total packed from authoritative pack lines
+  const totalPacked = packLines.reduce((s, p) => s + p.packed, 0)
+    || semenLines.reduce((s, l) => s + (l.units_packed ?? 0), 0);
+
+  // Tank label
+  const tankLabel = packInfo?.tanks?.tank_name || packInfo?.tanks?.tank_number || "";
 
   /* ================================================================
    * PAGE 1 — PORTRAIT — Billable items
@@ -119,7 +135,7 @@ export function generateWorksheetPdf(
   doc.setTextColor(0);
   doc.text("Breeding Worksheet", m, 21);
 
-  // Right side: protocol, type, head count — BOLD and BIGGER
+  // Right side: protocol, type, head count — BOLD
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(0);
@@ -201,91 +217,81 @@ export function generateWorksheetPdf(
   doc.setFontSize(10);
   doc.text("Semen — billable summary", m, y);
 
-  // Total packed ALWAYS from pack line totals (authoritative), never from project_bulls
-  const totalPacked = packLineTotals.length > 0
-    ? packLineTotals.reduce((s, p) => s + p.packed, 0)
-    : semenLines.reduce((s, l) => s + (l.units_packed ?? 0), 0);
+  // Field tank — bigger font
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  y += 5;
+  if (tankLabel) {
+    doc.text(`Field tank: ${tankLabel}`, m, y);
+  }
 
-  // Tank info line + checkboxes — always shown
-  const tankLabel = packInfo?.tanks?.tank_name || packInfo?.tanks?.tank_number || "";
+  // Tank packed / unpacked checkboxes — right-aligned with spacing
+  const unpackedLabel = "Tank unpacked ";
+  const unpackedLabelW = doc.getTextWidth(unpackedLabel);
+  const boxSize = 3.5;
+  const unpackedCheckX = pw - m - boxSize;
+  const unpackedTextX = unpackedCheckX - unpackedLabelW;
+  const packedLabel = "Tank packed ";
+  const packedLabelW = doc.getTextWidth(packedLabel);
+  const packedCheckX = unpackedTextX - 12 - boxSize; // 12mm gap between the two
+  const packedTextX = packedCheckX - packedLabelW;
+
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  y += 4;
-  let tankLine = "";
-  if (tankLabel) tankLine += `Field tank: ${tankLabel}`;
-  if (totalPacked > 0) tankLine += `${tankLine ? "    ·    " : ""}Total packed: ${totalPacked}`;
-  tankLine += `${tankLine ? "        " : ""}Tank packed `;
-  doc.text(tankLine, m, y);
-  const tankLineWidth = doc.getTextWidth(tankLine);
-  drawCheckbox(doc, m + tankLineWidth, y - 2.8);
-  const afterFirstBox = m + tankLineWidth + 7;
-  doc.text("Tank unpacked ", afterFirstBox, y);
-  drawCheckbox(doc, afterFirstBox + doc.getTextWidth("Tank unpacked "), y - 2.8);
+  doc.setFontSize(9);
+  doc.text(packedLabel, packedTextX, y);
+  drawCheckbox(doc, packedCheckX, y - 2.8, boxSize);
+  doc.text(unpackedLabel, unpackedTextX, y);
+  drawCheckbox(doc, unpackedCheckX, y - 2.8, boxSize);
+  y += 2;
 
-  // Build semen rows — per canister so you can take start/end inventory
-  // Use sessionDetails (per-canister) when available, fall back to semenLines (per-bull)
-  const semenRows: { label: string; canister: string; packed: number; blown: number | null; billable: number | null }[] = [];
+  // Front page semen table: Bull / Used / Blown / Billable — NO canister, NO packed
+  // Packed detail is on the back page where you need it for inventory
+  const bullSet = new Map<string, { label: string; blown: number | null; billable: number | null }>();
 
-  if (sessionDetails.length > 0) {
-    // Per-canister rows from session details — this is what you need to take inventory
-    for (const sd of sessionDetails) {
-      if (!sd.bull_name && sd.packed <= 0) continue;
-      semenRows.push({
-        label: bullLabel(sd.bull_name, sd.bull_code),
-        canister: sd.canister || "",
-        packed: sd.packed,
-        blown: null, // Filled in by hand per canister
-        billable: null,
-      });
-    }
-  } else if (packLineTotals.length > 0) {
-    for (const plt of packLineTotals) {
-      const sl = semenLines.find(s => s.bull_name === plt.bull_name || s.bull_code === plt.bull_code);
-      semenRows.push({
-        label: bullLabel(plt.bull_name, plt.bull_code),
-        canister: "",
-        packed: plt.packed,
-        blown: sl?.units_blown ?? null,
-        billable: sl?.units_billable ?? null,
-      });
-    }
-  } else if (semenLines.length > 0) {
+  if (semenLines.length > 0) {
     for (const sl of semenLines) {
-      semenRows.push({
+      bullSet.set(sl.bull_name, {
         label: bullLabel(sl.bull_name, sl.bull_code),
-        canister: "",
-        packed: sl.units_packed ?? 0,
         blown: sl.units_blown ?? null,
         billable: sl.units_billable ?? null,
       });
     }
+  } else if (packLines.length > 0) {
+    // Have pack data but no billing semen — list the bulls
+    const seen = new Set<string>();
+    for (const pl of packLines) {
+      if (seen.has(pl.bull_name)) continue;
+      seen.add(pl.bull_name);
+      bullSet.set(pl.bull_name, {
+        label: bullLabel(pl.bull_name, pl.bull_code),
+        blown: null,
+        billable: null,
+      });
+    }
   } else {
+    // Fallback to project_bulls
     for (const b of bulls) {
       const name = b.bulls_catalog?.bull_name || b.custom_bull_name || "";
       const code = b.bulls_catalog?.naab_code || "";
-      semenRows.push({ label: bullLabel(name, code), canister: "", packed: 0, blown: null, billable: null });
+      if (name) {
+        bullSet.set(name, { label: bullLabel(name, code), blown: null, billable: null });
+      }
     }
   }
 
-  const semenBody = semenRows
-    .filter(sd => sd.packed > 0 || sd.label)
-    .map(sd => [
-      sd.label,
-      sd.canister,
-      { content: nz(sd.packed), styles: { halign: "center" as const } },
-      { content: "", styles: { halign: "center" as const } },
-      { content: nz(sd.blown), styles: { halign: "center" as const } },
-      { content: nz(sd.billable), styles: { halign: "center" as const } },
-    ]);
-  for (let i = 0; i < 2; i++) semenBody.push(["", "", "", "", "", ""]);
+  const semenBody: any[][] = Array.from(bullSet.values()).map(sd => [
+    sd.label,
+    { content: "", styles: { halign: "center" as const } }, // Used — handwritten
+    { content: nz(sd.blown), styles: { halign: "center" as const } },
+    { content: nz(sd.billable), styles: { halign: "center" as const } },
+  ]);
+  for (let i = 0; i < 2; i++) semenBody.push(["", "", "", ""]);
 
   autoTable(doc, {
     startY: y + 2,
     margin: { left: m, right: m },
     head: [[
       "Bull",
-      "Canister",
-      { content: "Packed", styles: { halign: "center" as const } },
       { content: "Used", styles: { halign: "center" as const } },
       { content: "Blown", styles: { halign: "center" as const } },
       { content: "Billable", styles: { halign: "center" as const } },
@@ -295,11 +301,9 @@ export function generateWorksheetPdf(
     headStyles: { ...getStandardHeadStylesDark(), fontSize: 8 },
     columnStyles: {
       0: { cellWidth: "auto" },
-      1: { cellWidth: 20 },
-      2: { cellWidth: 16 },
-      3: { cellWidth: 16 },
-      4: { cellWidth: 16 },
-      5: { cellWidth: 18 },
+      1: { cellWidth: 22 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: 22 },
     },
   });
   y = (doc as any).lastAutoTable.finalY + 6;
@@ -349,8 +353,8 @@ export function generateWorksheetPdf(
         const cellY = data.cell.y;
         const cellW = data.cell.width;
         const cellH = data.cell.height;
-        const boxSize = 3.5;
-        drawCheckbox(doc, cellX + (cellW - boxSize) / 2, cellY + (cellH - boxSize) / 2, boxSize);
+        const bx = 3.5;
+        drawCheckbox(doc, cellX + (cellW - bx) / 2, cellY + (cellH - bx) / 2, bx);
       }
     },
   });
@@ -384,13 +388,17 @@ export function generateWorksheetPdf(
 
   let y2 = 24;
 
-  // Tank info — always shown
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  let tankText = "";
-  if (tankLabel) tankText += `Field tank: ${tankLabel}`;
-  if (totalPacked > 0) tankText += `${tankText ? "    ·    " : ""}Total packed: ${totalPacked}`;
-  if (tankText) doc.text(tankText, m, y2);
+  // Field tank — bigger font
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  if (tankLabel) {
+    doc.text(`Field tank: ${tankLabel}`, m, y2);
+  }
+  if (totalPacked > 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Total packed: ${totalPacked}`, m + (tankLabel ? doc.getTextWidth(`Field tank: ${tankLabel}`) + 8 : 0), y2);
+  }
   y2 += 6;
 
   /* -- Total packed per bull -- */
@@ -399,12 +407,27 @@ export function generateWorksheetPdf(
   doc.text("Total packed per bull", m, y2);
   y2 += 4;
 
-  // Bull summaries from pack line totals (authoritative), fallback to semenLines
-  const bullSummaries = packLineTotals.length > 0
-    ? packLineTotals.filter(p => p.packed > 0).map(p => ({ label: bullLabel(p.bull_name, p.bull_code), packed: p.packed }))
-    : semenLines.length > 0
-      ? semenLines.filter(sl => (sl.units_packed ?? 0) > 0).map(sl => ({ label: bullLabel(sl.bull_name, sl.bull_code), packed: sl.units_packed ?? 0 }))
-      : [];
+  // Build summaries from pack lines (authoritative) grouped by bull
+  const bullPackedMap = new Map<string, { label: string; packed: number }>();
+  for (const pl of packLines) {
+    const key = pl.bull_name;
+    const existing = bullPackedMap.get(key);
+    if (existing) {
+      existing.packed += pl.packed;
+    } else {
+      bullPackedMap.set(key, { label: bullLabel(pl.bull_name, pl.bull_code), packed: pl.packed });
+    }
+  }
+  // Fallback to semenLines if no pack lines
+  if (bullPackedMap.size === 0 && semenLines.length > 0) {
+    for (const sl of semenLines) {
+      if ((sl.units_packed ?? 0) > 0) {
+        bullPackedMap.set(sl.bull_name, { label: bullLabel(sl.bull_name, sl.bull_code), packed: sl.units_packed ?? 0 });
+      }
+    }
+  }
+
+  const bullSummaries = Array.from(bullPackedMap.values());
 
   // Draw bull summary pills
   doc.setFontSize(9);
@@ -456,6 +479,7 @@ export function generateWorksheetPdf(
     y2 += 2;
   }
 
+  // Columns: Bull | Canister | Packed | S1 start | S1 end | ... S4 end | Blown | Ret'd
   const maxSessions = 4;
   const sessionHead: any[] = [
     "Bull", "Canister",
@@ -468,55 +492,70 @@ export function generateWorksheetPdf(
   sessionHead.push({ content: "Blown", styles: { halign: "center" as const } });
   sessionHead.push({ content: "Ret'd", styles: { halign: "center" as const } });
 
-  // Look up blown per bull from semenLines
+  // Build blown lookup
   const blownByBull = new Map<string, number>();
   for (const sl of semenLines) {
     if ((sl.units_blown ?? 0) > 0) {
       blownByBull.set(sl.bull_name, sl.units_blown ?? 0);
-      if (sl.bull_code) blownByBull.set(sl.bull_code, sl.units_blown ?? 0);
     }
   }
 
-  const sessionBody: any[][] = sessionDetails.map(sd => {
-    const row: any[] = [
-      bullLabel(sd.bull_name, sd.bull_code),
-      sd.canister || "",
-      { content: nz(sd.packed), styles: { halign: "center" as const } },
-    ];
-    for (let i = 0; i < maxSessions; i++) {
-      const sess = sd.sessions[i];
-      row.push({ content: nz(sess?.start), styles: { halign: "center" as const } });
-      row.push({ content: nz(sess?.end), styles: { halign: "center" as const } });
-    }
-    const blown = blownByBull.get(sd.bull_name) || (sd.bull_code ? blownByBull.get(sd.bull_code) : null);
-    row.push({ content: nz(blown), styles: { halign: "center" as const } });
-    row.push({ content: nz(sd.returned), styles: { halign: "center" as const } });
-    return row;
-  });
+  // Build session body — prefer sessionDetails (from billing sessions), fall back to packLines
+  let sessionBody: any[][] = [];
 
-  if (sessionBody.length === 0 && bullSummaries.length > 0) {
-    for (const b of bullSummaries) {
-      const row: any[] = [b.label, "", { content: nz(b.packed), styles: { halign: "center" as const } }];
-      for (let i = 0; i < maxSessions * 2 + 2; i++) row.push({ content: "", styles: { halign: "center" as const } });
-      sessionBody.push(row);
-    }
+  if (sessionDetails.length > 0) {
+    // Have per-canister session data
+    sessionBody = sessionDetails.map(sd => {
+      const row: any[] = [
+        bullLabel(sd.bull_name, sd.bull_code),
+        sd.canister || "",
+        { content: nz(sd.packed), styles: { halign: "center" as const } },
+      ];
+      for (let i = 0; i < maxSessions; i++) {
+        const sess = sd.sessions[i];
+        row.push({ content: nz(sess?.start), styles: { halign: "center" as const } });
+        row.push({ content: nz(sess?.end), styles: { halign: "center" as const } });
+      }
+      const blown = blownByBull.get(sd.bull_name) ?? null;
+      row.push({ content: nz(blown), styles: { halign: "center" as const } });
+      row.push({ content: nz(sd.returned), styles: { halign: "center" as const } });
+      return row;
+    });
+  } else if (packLines.length > 0) {
+    // No sessions yet but have pack lines — show per-canister rows with blank session columns
+    sessionBody = packLines.map(pl => {
+      const row: any[] = [
+        bullLabel(pl.bull_name, pl.bull_code),
+        pl.canister,
+        { content: nz(pl.packed), styles: { halign: "center" as const } },
+      ];
+      for (let i = 0; i < maxSessions * 2; i++) {
+        row.push({ content: "", styles: { halign: "center" as const } });
+      }
+      row.push({ content: "", styles: { halign: "center" as const } }); // Blown
+      row.push({ content: "", styles: { halign: "center" as const } }); // Ret'd
+      return row;
+    });
   }
 
+  // Blank rows for write-ins
+  const totalCols = 3 + maxSessions * 2 + 2; // bull + canister + packed + sessions + blown + ret'd
   for (let i = 0; i < 4; i++) {
-    const blank: any[] = ["", "", ""];
-    for (let j = 0; j < maxSessions * 2 + 2; j++) blank.push("");
+    const blank: any[] = [];
+    for (let j = 0; j < totalCols; j++) blank.push("");
     sessionBody.push(blank);
   }
 
+  // Column widths for landscape letter (279mm - 24mm margins = 255mm)
   const colStyles: Record<number, any> = {
-    0: { cellWidth: 48 },
-    1: { cellWidth: 16 },
-    2: { cellWidth: 14 },
+    0: { cellWidth: 48 },  // Bull
+    1: { cellWidth: 16 },  // Canister
+    2: { cellWidth: 14 },  // Packed
   };
   for (let i = 0; i < maxSessions * 2; i++) {
     colStyles[3 + i] = { cellWidth: 16 };
   }
-  colStyles[3 + maxSessions * 2] = { cellWidth: 15 }; // Blown
+  colStyles[3 + maxSessions * 2] = { cellWidth: 15 };     // Blown
   colStyles[3 + maxSessions * 2 + 1] = { cellWidth: 15 }; // Ret'd
 
   autoTable(doc, {
@@ -547,8 +586,10 @@ export function generateWorksheetPdf(
     noteY += lineSpacing;
   }
 
+  /* -- Footer on all pages (called once, loops pages internally) -- */
   addFooterToPdf(doc, "BeefSynch by Chuteside, LLC", PDF_LAYOUT.footerOffsetMini);
 
+  /* -- Save -- */
   const safeName = sanitizeFilename(project.name || "project");
   doc.save(`BeefSynch_Breeding_Worksheet_${safeName}_${format(new Date(), "yyyy-MM-dd")}.pdf`);
 }

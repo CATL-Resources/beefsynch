@@ -867,23 +867,28 @@ const ProjectBilling = () => {
     toast({ title: "PDF downloaded" });
   }
 
-  function handlePrintWorksheet() {
+  async function handlePrintWorksheet() {
     if (!project) return;
     const firstPack = projectPacks[0] || null;
 
-    // ── Authoritative packed totals from tank_pack_lines ──
-    // These are the REAL packed amounts. project_bulls.units is a planning number and may be stale.
-    const packLineMap = new Map<string, { bull_name: string; bull_code: string | null; packed: number }>();
-    // We can derive this from sessionInventory which was already loaded from pack lines,
-    // or from semenLines which syncs from pack lines.
-    // semenLines.units_packed is synced from tank_pack_lines and is authoritative.
-    const packLineTotals = semenLines
-      .filter(sl => (sl.units_packed ?? 0) > 0)
-      .map(sl => ({
-        bull_name: sl.bull_name,
-        bull_code: sl.bull_code,
-        packed: sl.units_packed ?? 0,
-      }));
+    // ── Fetch actual pack lines directly — authoritative for canister + packed ──
+    let packLineRows: { bull_name: string; bull_code: string | null; canister: string; packed: number }[] = [];
+    if (firstPack?.id) {
+      const { data: plData } = await supabase
+        .from("tank_pack_lines")
+        .select("bull_name, bull_code, field_canister, units")
+        .eq("tank_pack_id", firstPack.id)
+        .order("bull_name")
+        .order("field_canister");
+      if (plData) {
+        packLineRows = plData.map((pl: any) => ({
+          bull_name: pl.bull_name || "",
+          bull_code: pl.bull_code || null,
+          canister: pl.field_canister || "",
+          packed: pl.units ?? 0,
+        }));
+      }
+    }
 
     // ── Breeding sessions only ──
     const breedOnly = sessions.filter(s => {
@@ -891,7 +896,7 @@ const ProjectBilling = () => {
       return label.includes("breed") || label.includes("ai ") || label === "ai";
     }).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.session_date.localeCompare(b.session_date));
 
-    // ── Per-bull/canister session detail rows ──
+    // ── Per-bull/canister session detail rows from sessionInventory ──
     const bullCanisterMap = new Map<string, {
       bull_name: string; bull_code: string | null; canister: string; packed: number;
       sessions: Record<number, { start: number | null; end: number | null }>;
@@ -918,12 +923,12 @@ const ProjectBilling = () => {
       if (inv.returned_units != null) entry.returned = Math.max(entry.returned ?? 0, inv.returned_units);
     }
 
-    // Fill per-canister packed from semenLines (total per bull, not per canister — best we have)
+    // Fill packed from pack lines
     for (const [, entry] of bullCanisterMap) {
-      const sl = semenLines.find(s =>
-        s.bull_name === entry.bull_name || (s.bull_code && s.bull_code === entry.bull_code)
+      const matchingPL = packLineRows.find(pl =>
+        pl.bull_name === entry.bull_name && pl.canister === entry.canister
       );
-      if (sl?.units_packed) entry.packed = sl.units_packed;
+      if (matchingPL) entry.packed = matchingPL.packed;
     }
 
     const sessionDetailRows = Array.from(bullCanisterMap.values()).sort((a, b) =>
@@ -946,7 +951,7 @@ const ProjectBilling = () => {
         sort_order: s.sort_order,
       })),
       sessionDetails: sessionDetailRows,
-      packLineTotals,
+      packLines: packLineRows,
     });
     toast({ title: "Breeding worksheet downloaded" });
   }
