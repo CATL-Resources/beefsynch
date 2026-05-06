@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { InvoiceOrderModal } from "@/components/orders/InvoiceOrderModal";
 import {
   CalendarDays, Package, AlertTriangle, DollarSign,
-  Droplets, Truck, ChevronRight, Clock, CheckCircle2, XCircle,
+  Droplets, Truck, ChevronRight, Clock, CheckCircle2, XCircle, Printer,
 } from "lucide-react";
+import { generateOperationsSummaryPdf } from "@/lib/generateOperationsSummaryPdf";
 
 interface HubTabProps {
   orgId: string;
@@ -29,6 +30,11 @@ interface UpcomingProject {
   pack_status: string | null;
   packed_units: number | null;
   bull_names: string[];
+  products_delivered: number;
+  products_total: number;
+  has_labor: boolean;
+  billing_status: "none" | "started" | "complete";
+  product_summary: string;
 }
 
 interface ActionCounts {
@@ -122,14 +128,75 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           }
         }
 
+        // Fetch billing summary for each project
+        const billingMap = new Map<string, { products_delivered: number; products_total: number; has_labor: boolean; billing_status: string; product_summary: string }>();
+        if (projIds.length > 0) {
+          const { data: billingData } = await supabase
+            .from("project_billing")
+            .select("id, project_id, billing_completed_at")
+            .in("project_id", projIds);
+
+          if (billingData && billingData.length > 0) {
+            const billingIds = billingData.map(b => b.id);
+
+            // Products
+            const { data: prodData } = await supabase
+              .from("project_billing_products")
+              .select("billing_id, delivery_method, doses, units_billed")
+              .in("billing_id", billingIds);
+
+            // Labor
+            const { data: laborData } = await supabase
+              .from("project_billing_labor")
+              .select("billing_id")
+              .in("billing_id", billingIds);
+
+            for (const bill of billingData) {
+              const prods = (prodData ?? []).filter(p => p.billing_id === bill.id);
+              const delivered = prods.filter(p => p.delivery_method && p.delivery_method !== "not_yet");
+              const hasValues = prods.filter(p => (p.doses ?? 0) > 0 || (Number(p.units_billed) ?? 0) > 0);
+              const hasLabor = (laborData ?? []).some(l => l.billing_id === bill.id);
+
+              // Build delivery summary like "3 pickup, 1 we gave"
+              const methodCounts: Record<string, number> = {};
+              for (const p of delivered) {
+                const label = p.delivery_method === "pickup" ? "pickup"
+                  : p.delivery_method === "we_gave" ? "we gave"
+                  : p.delivery_method === "drop_off" ? "drop off"
+                  : "";
+                if (label) methodCounts[label] = (methodCounts[label] || 0) + 1;
+              }
+              const summary = Object.entries(methodCounts).map(([k, v]) => `${v} ${k}`).join(", ");
+
+              let status: "none" | "started" | "complete" = "none";
+              if (bill.billing_completed_at) status = "complete";
+              else if (delivered.length > 0 || hasValues.length > 0 || hasLabor) status = "started";
+
+              billingMap.set(bill.project_id, {
+                products_delivered: delivered.length,
+                products_total: prods.length,
+                has_labor: hasLabor,
+                billing_status: status,
+                product_summary: summary,
+              });
+            }
+          }
+        }
+
         for (const p of projData) {
           const pack = packMap.get(p.id);
+          const billing = billingMap.get(p.id);
           projectsWithPacks.push({
             ...p,
             pack_id: pack?.pack_id || null,
             pack_status: pack?.pack_status || null,
             packed_units: pack?.packed_units ?? null,
             bull_names: bullNameMap.get(p.id) || [],
+            products_delivered: billing?.products_delivered ?? 0,
+            products_total: billing?.products_total ?? 0,
+            has_labor: billing?.has_labor ?? false,
+            billing_status: (billing?.billing_status ?? "none") as "none" | "started" | "complete",
+            product_summary: billing?.product_summary ?? "",
           });
         }
       }
@@ -640,6 +707,10 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             <span className="text-xs text-muted-foreground">
               {format(today, "MMM d")} – {format(addDays(today, 6), "MMM d")}
             </span>
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1 ml-2"
+              onClick={() => generateOperationsSummaryPdf(orgId)}>
+              <Printer className="h-3.5 w-3.5" /> Print Summary
+            </Button>
           </div>
           <span className="text-xs text-muted-foreground">
             {thisWeek.length} project{thisWeek.length !== 1 ? "s" : ""}
@@ -680,6 +751,25 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                         <p className="mt-0.5 text-xs text-primary/80 truncate">
                           {p.bull_names.join(", ")}
                         </p>
+                      )}
+                      {/* Billing status strip */}
+                      {p.billing_status !== "none" && (
+                        <div className="mt-1.5 flex items-center gap-2 text-[11px] flex-wrap">
+                          {p.products_delivered > 0 && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700">
+                              <Package className="h-3 w-3" />
+                              {p.product_summary}
+                            </span>
+                          )}
+                          {p.has_labor && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700">
+                              Labor entered
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {p.billing_status === "none" && p.products_total === 0 && (
+                        <p className="mt-1 text-[11px] text-muted-foreground/60 italic">No billing started</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -789,6 +879,9 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                     <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
                       {p.bull_names.length > 0 && (
                         <span className="text-primary/80 truncate max-w-[150px]">{p.bull_names.join(", ")}</span>
+                      )}
+                      {p.products_delivered > 0 && (
+                        <span className="text-[10px] text-emerald-600">{p.product_summary}</span>
                       )}
                       <span>{p.head_count} hd</span>
                       <span>·</span>
