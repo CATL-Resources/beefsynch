@@ -8,7 +8,7 @@ import NewProjectDialog from "@/components/NewProjectDialog";
 import CustomerPicker from "@/components/CustomerPicker";
 import { generateProjectPdf } from "@/lib/generateProjectPdf";
 import { generateProjectCsv } from "@/lib/generateProjectCsv";
-import { generateWorksheetPdf } from "@/lib/generateWorksheetPdf";
+import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import { buildProjectIcsEvents, generateIcsFile, downloadIcsFile } from "@/lib/generateIcs";
 import {
@@ -698,29 +698,8 @@ const ProjectDetail = () => {
               title="Breeding Worksheet"
               onClick={async () => {
                 if (!project) return;
-                const billingRes = await supabase
-                  .from("project_billing")
-                  .select("id")
-                  .eq("project_id", project.id)
-                  .maybeSingle();
-                let products: any[] = [];
-                if (billingRes.data?.id) {
-                  const { data } = await supabase
-                    .from("project_billing_products")
-                    .select("*")
-                    .eq("billing_id", billingRes.data.id)
-                    .order("sort_order");
-                  products = data ?? [];
-                }
-                const { data: packLinks } = await supabase
-                  .from("tank_pack_projects")
-                  .select("tank_packs(id, status, pack_type, field_tank_id, tanks:field_tank_id(id, tank_number, tank_name))")
-                  .eq("project_id", project.id);
-                const firstPack = (packLinks ?? [])
-                  .map((pl: any) => pl.tank_packs)
-                  .find(Boolean) || null;
-                generateWorksheetPdf(project, events, bulls, products, firstPack, undefined);
-                toast({ title: "Worksheet downloaded" });
+                await printBreedingWorksheet(project);
+                toast({ title: "Breeding worksheet downloaded" });
               }}
             >
               <FileText className="h-4 w-4" />
