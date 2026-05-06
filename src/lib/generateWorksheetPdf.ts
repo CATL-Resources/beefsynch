@@ -316,7 +316,8 @@ export function generateWorksheetPdf(
   const visibleProducts = products.filter((p: any) =>
     (p.delivery_method && p.delivery_method !== "not_yet") ||
     (p.doses ?? 0) > 0 ||
-    (p.units_billed ?? 0) > 0,
+    (p.units_billed ?? 0) > 0 ||
+    (p.product_name || "").toLowerCase().includes("arm service"),
   );
 
   const formatQty = (p: any): string => {
@@ -328,8 +329,16 @@ export function generateWorksheetPdf(
     return "";
   };
 
+  const deliveryLabel = (dm: string | null): string => {
+    if (!dm || dm === "not_yet") return "";
+    if (dm === "pickup") return " [Pickup]";
+    if (dm === "we_gave") return " [We gave]";
+    if (dm === "drop_off") return " [Drop off]";
+    return "";
+  };
+
   const productBody = visibleProducts.map((p: any) => [
-    p.product_name || "",
+    (p.product_name || "") + deliveryLabel(p.delivery_method),
     { content: formatQty(p), styles: { halign: "right" as const } },
     "",
   ]);

@@ -174,7 +174,7 @@ export default function SessionsTab({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[180px]">Product</TableHead>
+                  <TableHead className="w-[180px]">Product / Service</TableHead>
                   <TableHead className="w-[80px] text-right">Head</TableHead>
                   <TableHead className="w-[100px] text-right">Units</TableHead>
                   <TableHead className="w-[90px] text-right">Price</TableHead>
@@ -229,7 +229,7 @@ export default function SessionsTab({
                         {isEditing ? (
                           <Input type="number" className="h-8 w-[70px] text-right text-xs ml-auto" value={line.doses || ""} placeholder="—"
                             onChange={(e) => onSaveProduct(idx, { doses: Number(e.target.value) || 0 })} />
-                        ) : <span className="text-sm">{line.doses || "—"}</span>}
+                        ) : <span className={`text-sm ${(line.doses ?? 0) > 0 ? "text-base font-bold text-emerald-700" : ""}`}>{line.doses || "—"}</span>}
                       </TableCell>
                       <TableCell className="text-right">
                         {isEditing ? (
@@ -258,7 +258,7 @@ export default function SessionsTab({
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs">{fmtUnits(line)}</span>
+                          <span className={`text-xs ${(line.units_billed ?? 0) > 0 ? "text-sm font-bold text-emerald-700" : ""}`}>{fmtUnits(line)}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -343,6 +343,16 @@ export default function SessionsTab({
                     </Button>
                   </div>
                 )}
+                {isEditing && (
+                  <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+                    <div>
+                      <label className="text-muted-foreground">Pickup date</label>
+                      <Input type="date" className="h-8 text-xs mt-1"
+                        value={s.session_date || ""}
+                        onChange={(e) => onSaveSession(sessionIdx, { session_date: e.target.value })} />
+                    </div>
+                  </div>
+                )}
                 {renderProductTable(sessionId, isEditing, prods, true)}
                 {!readOnly && (
                   <div className="flex justify-end pt-2">
@@ -411,6 +421,30 @@ export default function SessionsTab({
                   <p className="text-sm text-muted-foreground italic">Customer administered — no billable products.</p>
                 ) : (
                   <>
+                    {isEditing && !isCustAdmin && (
+                      <div className="grid grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <label className="text-muted-foreground">Date</label>
+                          <Input type="date" className="h-8 text-xs mt-1"
+                            value={s.session_date || ""}
+                            onChange={(e) => onSaveSession(sessionIdx, { session_date: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="text-muted-foreground">Label</label>
+                          <Input className="h-8 text-xs mt-1"
+                            value={s.session_label || ""}
+                            placeholder="e.g. Timed Breeding"
+                            onChange={(e) => onSaveSession(sessionIdx, { session_label: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="text-muted-foreground">Time</label>
+                          <Input className="h-8 text-xs mt-1"
+                            value={s.time_of_day || ""}
+                            placeholder="e.g. 7:00 AM"
+                            onChange={(e) => onSaveSession(sessionIdx, { time_of_day: e.target.value })} />
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div>
                         <label className="text-muted-foreground">Crew</label>
@@ -475,7 +509,9 @@ export default function SessionsTab({
                     <TableRow key={line.id}>
                       <TableCell className="text-xs">{line.event_date ? format(parseISO(line.event_date), "MMM d") : "—"}</TableCell>
                       <TableCell className="text-sm">{line.product_name}</TableCell>
-                      <TableCell className="text-right text-sm">{line.doses || "—"}</TableCell>
+                      <TableCell className="text-right text-sm">
+                        <span className={(line.doses ?? 0) > 0 ? "text-base font-bold text-emerald-700" : ""}>{line.doses || "—"}</span>
+                      </TableCell>
                       <TableCell className="text-right text-sm font-medium">{line.line_total ? formatCurrency(line.line_total) : "—"}</TableCell>
                     </TableRow>
                   ))}

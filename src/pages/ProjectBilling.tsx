@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { toast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Printer, ClipboardList, Check, Package, PackageOpen, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Printer, ClipboardList, Check, Package, PackageOpen, Trash2, Plus, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
@@ -15,6 +15,7 @@ import { generateBillingSheetPdf } from "@/lib/generateBillingSheetPdf";
 import { generateWorksheetPdf } from "@/lib/generateWorksheetPdf";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import BillingTab from "@/components/billing/BillingTab";
+import NewProjectDialog from "@/components/NewProjectDialog";
 
 import {
   BillingProduct, ProductLine, SessionLine, SessionInventoryLine, SemenLine, LaborLine,
@@ -45,6 +46,7 @@ const ProjectBilling = () => {
   const [semenLines, setSemenLines] = useState<SemenLine[]>([]);
   const [laborLines, setLaborLines] = useState<LaborLine[]>([]);
 
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1114,6 +1116,9 @@ const ProjectBilling = () => {
             <span className={`px-3 py-1.5 rounded-full text-xs font-medium ${STATUS_COLORS[currentStatus] || "bg-muted text-muted-foreground"}`}>
               {STATUS_LABELS[currentStatus] || currentStatus}
             </span>
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setEditProjectOpen(true)} title="Edit Project">
+              <Pencil className="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrintWorksheet} title="Breeding Worksheet">
               <ClipboardList className="h-4 w-4" />
             </Button>
@@ -1289,6 +1294,30 @@ const ProjectBilling = () => {
           </div>
         </div>
       )}
+      <NewProjectDialog
+        open={editProjectOpen}
+        onOpenChange={setEditProjectOpen}
+        onProjectCreated={() => loadData()}
+        editData={project ? {
+          id: project.id,
+          name: project.name,
+          customer_id: (project as any).customer_id,
+          cattle_type: project.cattle_type,
+          protocol: project.protocol,
+          head_count: project.head_count,
+          breeding_date: project.breeding_date,
+          breeding_time: project.breeding_time,
+          status: project.status,
+          notes: project.notes,
+          last_contacted_date: project.last_contacted_date,
+          last_contacted_by: project.last_contacted_by,
+          bulls: projectBulls.map((b: any) => ({
+            name: b.bulls_catalog ? b.bulls_catalog.bull_name : b.custom_bull_name ?? "",
+            catalogId: b.bull_catalog_id,
+            units: b.units,
+          })),
+        } : null}
+      />
       <AppFooter />
     </div>
   );
