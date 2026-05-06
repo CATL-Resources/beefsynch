@@ -949,6 +949,22 @@ const ProjectBilling = () => {
       freshInventory = invData ?? [];
     }
 
+    // 6. Get labor entries
+    let freshLabor: { description: string; labor_dates: string | null }[] = [];
+    if (billingId) {
+      const { data: laborData } = await supabase
+        .from("project_billing_labor")
+        .select("description, labor_dates")
+        .eq("billing_id", billingId)
+        .order("sort_order");
+      if (laborData) {
+        freshLabor = laborData.map((l: any) => ({
+          description: l.description || "",
+          labor_dates: l.labor_dates || null,
+        }));
+      }
+    }
+
     // 6. Build per-bull/canister session detail rows
     const bullCanisterMap = new Map<string, {
       bull_name: string; bull_code: string | null; canister: string; packed: number;
@@ -994,6 +1010,7 @@ const ProjectBilling = () => {
       breedingSessions: breedOnly,
       sessionDetails: sessionDetailRows,
       packLines: packLineRows,
+      laborEntries: freshLabor,
     });
     toast({ title: "Breeding worksheet downloaded" });
   }
