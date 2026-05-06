@@ -289,13 +289,18 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       // Unbilled projects — merge into Ready to Invoice
       const { data: unbilled } = await supabase
         .from("projects")
-        .select("id, name, status, breeding_date, project_billing(billing_completed_at)")
+        .select("id, name, status, breeding_date, project_billing(billing_completed_at, status, catl_invoice_number, select_sires_invoice_number)")
         .eq("organization_id", orgId)
         .in("status", ["Work Complete", "Invoiced"]);
 
       const unbilledProjects = (unbilled || []).filter((p: any) => {
         const billing = Array.isArray(p.project_billing) ? p.project_billing[0] : p.project_billing;
-        return !billing?.billing_completed_at;
+        // Skip if billing is marked complete by ANY indicator
+        if (billing?.billing_completed_at) return false;
+        if (billing?.status === "invoiced_closed") return false;
+        // Skip if project is Invoiced AND has an invoice number entered
+        if (p.status === "Invoiced" && (billing?.catl_invoice_number || billing?.select_sires_invoice_number)) return false;
+        return true;
       });
 
       const projectRows = unbilledProjects.map((p: any) => ({
