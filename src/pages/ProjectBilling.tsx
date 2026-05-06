@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { generateBillingSheetPdf } from "@/lib/generateBillingSheetPdf";
-import { generateWorksheetPdf } from "@/lib/generateWorksheetPdf";
+import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import BillingTab from "@/components/billing/BillingTab";
 import NewProjectDialog from "@/components/NewProjectDialog";
@@ -871,147 +871,7 @@ const ProjectBilling = () => {
 
   async function handlePrintWorksheet() {
     if (!project) return;
-
-    // ── Fetch ALL data fresh from DB — never rely on component state ──
-
-    // 1. Get the pack for this project (via the link table)
-    const { data: packLinks } = await supabase
-      .from("tank_pack_projects")
-      .select("tank_pack_id, tank_packs(id, status, pack_type, field_tank_id, tanks:field_tank_id(id, tank_number, tank_name))")
-      .eq("project_id", project.id);
-    const packs = (packLinks ?? []).map((pl: any) => pl.tank_packs).filter(Boolean);
-    const firstPack = packs[0] || null;
-
-    // 2. Get pack lines (canister-level packed data — authoritative)
-    let packLineRows: { bull_name: string; bull_code: string | null; canister: string; packed: number }[] = [];
-    if (firstPack?.id) {
-      const { data: plData } = await supabase
-        .from("tank_pack_lines")
-        .select("bull_name, bull_code, field_canister, units")
-        .eq("tank_pack_id", firstPack.id)
-        .order("bull_name")
-        .order("field_canister");
-      if (plData) {
-        packLineRows = plData.map((pl: any) => ({
-          bull_name: pl.bull_name || "",
-          bull_code: pl.bull_code || null,
-          canister: pl.field_canister || "",
-          packed: pl.units ?? 0,
-        }));
-      }
-    }
-
-    // 3. Get billing semen lines
-    let freshSemenLines: { bull_name: string; bull_code: string | null; units_packed: number | null; units_blown: number | null; units_billable: number | null }[] = [];
-    if (billingId) {
-      const { data: semData } = await supabase
-        .from("project_billing_semen")
-        .select("bull_name, bull_code, units_packed, units_blown, units_billable")
-        .eq("billing_id", billingId)
-        .order("sort_order");
-      if (semData) {
-        freshSemenLines = semData.map((sl: any) => ({
-          bull_name: sl.bull_name || "",
-          bull_code: sl.bull_code || null,
-          units_packed: sl.units_packed ?? null,
-          units_blown: sl.units_blown ?? null,
-          units_billable: sl.units_billable ?? null,
-        }));
-      }
-    }
-
-    // 4. Get billing sessions (breeding only)
-    let breedOnly: { id: string; session_label: string | null; session_date: string; time_of_day: string | null; sort_order: number | null }[] = [];
-    if (billingId) {
-      const { data: sessData } = await supabase
-        .from("project_billing_sessions")
-        .select("id, session_label, session_date, time_of_day, sort_order")
-        .eq("billing_id", billingId)
-        .order("sort_order");
-      if (sessData) {
-        breedOnly = sessData
-          .filter((s: any) => {
-            const label = (s.session_label || "").toLowerCase();
-            return label.includes("breed") || label.includes("ai ") || label === "ai" || label.includes("tai");
-          })
-          .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.session_date.localeCompare(b.session_date));
-      }
-    }
-
-    // 5. Get session inventory
-    let freshInventory: any[] = [];
-    if (billingId) {
-      const { data: invData } = await supabase
-        .from("project_billing_session_inventory")
-        .select("*")
-        .eq("billing_id", billingId)
-        .order("sort_order");
-      freshInventory = invData ?? [];
-    }
-
-    // 6. Get labor entries
-    let freshLabor: { description: string; labor_dates: string | null }[] = [];
-    if (billingId) {
-      const { data: laborData } = await supabase
-        .from("project_billing_labor")
-        .select("description, labor_dates")
-        .eq("billing_id", billingId)
-        .order("sort_order");
-      if (laborData) {
-        freshLabor = laborData.map((l: any) => ({
-          description: l.description || "",
-          labor_dates: l.labor_dates || null,
-        }));
-      }
-    }
-
-    // 6. Build per-bull/canister session detail rows
-    const bullCanisterMap = new Map<string, {
-      bull_name: string; bull_code: string | null; canister: string; packed: number;
-      sessions: Record<number, { start: number | null; end: number | null }>;
-      returned: number | null;
-    }>();
-
-    for (const inv of freshInventory) {
-      const key = `${inv.bull_catalog_id || inv.bull_name}|${inv.canister}`;
-      if (!bullCanisterMap.has(key)) {
-        bullCanisterMap.set(key, {
-          bull_name: inv.bull_name,
-          bull_code: inv.bull_code,
-          canister: inv.canister,
-          packed: 0,
-          sessions: {},
-          returned: null,
-        });
-      }
-      const entry = bullCanisterMap.get(key)!;
-      const sessIdx = breedOnly.findIndex(s => s.id === inv.session_id);
-      if (sessIdx >= 0) {
-        entry.sessions[sessIdx] = { start: inv.start_units, end: inv.end_units };
-      }
-      if (inv.returned_units != null) entry.returned = Math.max(entry.returned ?? 0, inv.returned_units);
-    }
-
-    // Fill packed from pack lines
-    for (const [, entry] of bullCanisterMap) {
-      const matchingPL = packLineRows.find(pl =>
-        pl.bull_name === entry.bull_name && pl.canister === entry.canister
-      );
-      if (matchingPL) entry.packed = matchingPL.packed;
-    }
-
-    const sessionDetailRows = Array.from(bullCanisterMap.values()).sort((a, b) =>
-      a.bull_name.localeCompare(b.bull_name) || a.canister.localeCompare(b.canister, undefined, { numeric: true })
-    );
-
-    // 7. Generate the PDF
-    generateWorksheetPdf(project, events, projectBulls, productLines, firstPack, {
-      semenLines: freshSemenLines,
-      breedingSessions: breedOnly,
-      sessionDetails: sessionDetailRows,
-      packLines: packLineRows,
-      laborEntries: freshLabor,
-    });
+    await printBreedingWorksheet(project);
     toast({ title: "Breeding worksheet downloaded" });
   }
 
