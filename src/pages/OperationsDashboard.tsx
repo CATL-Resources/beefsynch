@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   ShoppingCart,
-  Layers, ScrollText, List, Users, LayoutDashboard,
+  Layers, ScrollText, List, Users, LayoutDashboard, Container,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
@@ -31,6 +31,7 @@ const TABS: TabDef[] = [
   { key: "hub", label: "Hub", icon: LayoutDashboard },
   { key: "projects", label: "Projects", icon: List },
   { key: "inventory", label: "Inventory", icon: Layers },
+  { key: "tanks", label: "Tanks", icon: Container },
   { key: "orders", label: "Orders", icon: ShoppingCart },
   { key: "customers", label: "Customers", icon: Users },
   { key: "log", label: "Log", icon: ScrollText },
@@ -46,15 +47,14 @@ const OperationsDashboard = () => {
   const activeTab = (searchParams.get("tab") as TabKey) || "hub";
   const inventoryOwnerFilter = (searchParams.get("owner") as "all" | "company" | "customer") || "company";
   const viewParam = searchParams.get("view");
-  const [inventoryView, setInventoryView] = useState<"bull" | "tank" | "planning">(
-    viewParam === "tank" ? "tank" : viewParam === "planning" ? "planning" : "bull"
+  const [inventoryView, setInventoryView] = useState<"bull" | "planning">(
+    viewParam === "planning" ? "planning" : "bull"
   );
 
   useEffect(() => {
     const vp = searchParams.get("view");
-    if (vp === "tank") setInventoryView("tank");
-    else if (vp === "planning") setInventoryView("planning");
-    else if (vp === "bull") setInventoryView("bull");
+    if (vp === "planning") setInventoryView("planning");
+    else setInventoryView("bull");
   }, [searchParams]);
 
   const setTab = (tab: TabKey, extra?: Record<string, string>) => {
@@ -116,17 +116,6 @@ const OperationsDashboard = () => {
                   By Bull
                 </button>
                 <button
-                  onClick={() => setInventoryView("tank")}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-                    inventoryView === "tank"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-card/60 text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/40"
-                  )}
-                >
-                  By Tank
-                </button>
-                <button
                   onClick={() => setInventoryView("planning")}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
@@ -142,13 +131,13 @@ const OperationsDashboard = () => {
               {inventoryView === "bull" && (
                 <InventoryTab orgId={orgId} initialOwnerFilter={inventoryOwnerFilter} onFilterReset={() => setSearchParams({ tab: "inventory" }, { replace: true })} />
               )}
-              {inventoryView === "tank" && (
-                <TanksTabContent orgId={orgId} orgName={orgName ?? null} userId={userId ?? null} companyOnly initialSubTab={searchParams.get("subTab") || undefined} />
-              )}
               {inventoryView === "planning" && (
                 <Planning embedded />
               )}
             </div>
+          )}
+          {activeTab === "tanks" && orgId && (
+            <TanksTabContent orgId={orgId} orgName={orgName ?? null} userId={userId ?? null} companyOnly={false} initialSubTab={searchParams.get("subTab") || undefined} />
           )}
           {activeTab === "orders" && orgId && (
             <OrdersTab orgId={orgId} />

@@ -112,11 +112,11 @@ const App = () => (
                 <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
                 <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
                 <Route path="/companies" element={<ProtectedRoute><Companies /></ProtectedRoute>} />
-                <Route path="/tanks" element={<Navigate to="/operations?tab=inventory" replace />} />
+                <Route path="/tanks" element={<Navigate to="/operations?tab=tanks" replace />} />
                 <Route path="/tanks/:id" element={<ProtectedRoute><TankDetail /></ProtectedRoute>} />
                 <Route path="/tanks/:tankId/reinventory" element={<ProtectedRoute><ReInventory /></ProtectedRoute>} />
-                <Route path="/tank-fills" element={<Navigate to="/operations?tab=inventory" replace />} />
-                <Route path="/tanks-out" element={<Navigate to="/operations?tab=inventory" replace />} />
+                <Route path="/tank-fills" element={<Navigate to="/operations?tab=tanks" replace />} />
+                <Route path="/tanks-out" element={<Navigate to="/operations?tab=tanks" replace />} />
                 <Route path="/semen-inventory" element={<Navigate to="/operations?tab=inventory" replace />} />
                 <Route path="/receive-shipment" element={<ProtectedRoute><ReceiveShipment /></ProtectedRoute>} />
                 <Route path="/receive-shipment/preview/:id" element={<ProtectedRoute><ReceiveShipmentPreview /></ProtectedRoute>} />
