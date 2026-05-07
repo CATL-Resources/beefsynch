@@ -351,18 +351,19 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
 
       if (unpackedProjects.length > 0) {
         const unpackedIds = unpackedProjects.map(p => p.id);
+        // semen_source tells us who's supplying the semen. customer-supplied
+        // bulls are checked against the project customer's own inventory.
         const { data: projBulls } = await supabase
           .from("project_bulls")
-          .select("project_id, bull_catalog_id, custom_bull_name, units")
+          .select("project_id, bull_catalog_id, custom_bull_name, units, semen_source, projects!project_bulls_project_id_fkey(customer_id)")
           .in("project_id", unpackedIds);
 
         if (projBulls && projBulls.length > 0) {
-          // Get all bull_catalog_ids we need to check
           const catalogIds = (projBulls)
             .map(pb => pb.bull_catalog_id)
             .filter(Boolean);
 
-          // Sum available inventory per bull from tanks that are here
+          // Available company stock = tanks here + customer_id IS NULL.
           const { data: hereTanks } = await supabase
             .from("tanks")
             .select("id")
@@ -370,20 +371,39 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             .eq("location_status", "here");
           const hereTankIds = (hereTanks || []).map((t: any) => t.id);
 
-          const { data: invData } = await supabase.from("tank_inventory")
+          const { data: companyInv } = await supabase.from("tank_inventory")
             .select("bull_catalog_id, units")
             .is("customer_id", null)
             .in("bull_catalog_id", catalogIds.length > 0 ? catalogIds : ["00000000-0000-0000-0000-000000000000"])
             .in("tank_id", hereTankIds.length > 0 ? hereTankIds : ["00000000-0000-0000-0000-000000000000"]);
 
-          const availableByBull = new Map<string, number>();
-          for (const inv of (invData || []) as any[]) {
+          const companyAvailable = new Map<string, number>();
+          for (const inv of (companyInv || []) as any[]) {
             if (inv.bull_catalog_id) {
-              availableByBull.set(inv.bull_catalog_id, (availableByBull.get(inv.bull_catalog_id) || 0) + (inv.units || 0));
+              companyAvailable.set(inv.bull_catalog_id, (companyAvailable.get(inv.bull_catalog_id) || 0) + (inv.units || 0));
             }
           }
 
-          // Get bull names from catalog
+          // Customer-owned inventory keyed by `${customer_id}|${bull_catalog_id}`.
+          const customerIds = Array.from(new Set(
+            (projBulls as any[])
+              .map(pb => pb.projects?.customer_id as string | null | undefined)
+              .filter((x): x is string => !!x)
+          ));
+          const customerAvailable = new Map<string, number>();
+          if (customerIds.length > 0) {
+            const { data: custInv } = await supabase.from("tank_inventory")
+              .select("bull_catalog_id, customer_id, units")
+              .in("customer_id", customerIds)
+              .in("bull_catalog_id", catalogIds.length > 0 ? catalogIds : ["00000000-0000-0000-0000-000000000000"]);
+            for (const inv of (custInv || []) as any[]) {
+              if (inv.bull_catalog_id && inv.customer_id) {
+                const key = `${inv.customer_id}|${inv.bull_catalog_id}`;
+                customerAvailable.set(key, (customerAvailable.get(key) || 0) + (inv.units || 0));
+              }
+            }
+          }
+
           const { data: bullNames } = await supabase
             .from("bulls_catalog")
             .select("id, bull_name")
@@ -391,15 +411,23 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           const nameMap = new Map<string, string>();
           for (const b of (bullNames || []) as any[]) nameMap.set(b.id, b.bull_name);
 
-          // Check each project
           for (const proj of unpackedProjects) {
-            const bulls = (projBulls).filter(pb => pb.project_id === proj.id);
+            const bulls = (projBulls as any[]).filter(pb => pb.project_id === proj.id);
             const shortBulls: { bullName: string; needed: number; available: number }[] = [];
 
             for (const pb of bulls) {
               const needed = pb.units || 0;
               if (needed <= 0) continue;
-              const available = pb.bull_catalog_id ? (availableByBull.get(pb.bull_catalog_id) || 0) : 0;
+              if (!pb.bull_catalog_id) continue;
+              let available = 0;
+              if (pb.semen_source === "customer") {
+                const projCustomerId = pb.projects?.customer_id;
+                available = projCustomerId
+                  ? (customerAvailable.get(`${projCustomerId}|${pb.bull_catalog_id}`) || 0)
+                  : 0;
+              } else {
+                available = companyAvailable.get(pb.bull_catalog_id) || 0;
+              }
               if (available < needed) {
                 shortBulls.push({
                   bullName: nameMap.get(pb.bull_catalog_id) || pb.custom_bull_name || "Unknown",

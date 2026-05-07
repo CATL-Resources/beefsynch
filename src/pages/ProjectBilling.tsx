@@ -1243,6 +1243,7 @@ const ProjectBilling = () => {
             name: b.bulls_catalog ? b.bulls_catalog.bull_name : b.custom_bull_name ?? "",
             catalogId: b.bull_catalog_id,
             units: b.units,
+            semenSource: b.semen_source,
           })),
         } : null}
       />

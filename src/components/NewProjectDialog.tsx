@@ -76,6 +76,7 @@ interface BullRow {
   name: string;
   catalogId: string | null;
   units: number;
+  semenSource?: "company" | "customer";
 }
 
 interface EditProjectData {
@@ -91,7 +92,7 @@ interface EditProjectData {
   notes: string | null;
   last_contacted_date?: string | null;
   last_contacted_by?: string | null;
-  bulls: { name: string; catalogId: string | null; units: number }[];
+  bulls: { name: string; catalogId: string | null; units: number; semenSource?: "company" | "customer" }[];
 }
 
 interface NewProjectDialogProps {
@@ -293,6 +294,7 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
           bull_catalog_id: b.catalogId,
           custom_bull_name: b.catalogId ? null : b.name.trim(),
           units: b.units,
+          semen_source: b.semenSource ?? "company",
         }));
         const { error: bullError } = await supabase.from("project_bulls").insert(bullRows);
         if (bullError) throw bullError;

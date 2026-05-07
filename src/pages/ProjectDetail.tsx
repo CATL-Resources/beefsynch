@@ -101,6 +101,7 @@ interface BullRow {
   units: number;
   custom_bull_name: string | null;
   bull_catalog_id: string | null;
+  semen_source: "company" | "customer";
   bulls_catalog: { bull_name: string; company: string; registration_number: string; breed: string } | null;
 }
 
@@ -312,6 +313,20 @@ const ProjectDetail = () => {
       setLastSyncedAt(null);
     }
   }, [id, userId]);
+
+  const toggleSemenSource = async (b: BullRow) => {
+    const next = b.semen_source === "customer" ? "company" : "customer";
+    setBulls((prev) => prev.map((row) => row.id === b.id ? { ...row, semen_source: next } : row));
+    const { error } = await supabase
+      .from("project_bulls")
+      .update({ semen_source: next })
+      .eq("id", b.id);
+    if (error) {
+      // Roll back UI change on failure
+      setBulls((prev) => prev.map((row) => row.id === b.id ? { ...row, semen_source: b.semen_source } : row));
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
 
   const handleChangeCustomer = async (newCustomerId: string | null) => {
     if (!newCustomerId || !project) return;
@@ -1059,6 +1074,7 @@ const ProjectDetail = () => {
                   <TableRow>
                     <TableHead className="w-8"></TableHead>
                     <TableHead>Bull Name</TableHead>
+                    <TableHead>Source</TableHead>
                     <TableHead className="text-right">Units</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1102,6 +1118,20 @@ const ProjectDetail = () => {
                             <ClickableRegNumber registrationNumber={b.bulls_catalog.registration_number} breed={b.bulls_catalog.breed} />
                           </div>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => toggleSemenSource(b)}
+                          className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 border transition-colors ${
+                            b.semen_source === "customer"
+                              ? "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20"
+                              : "border-blue-500/40 bg-blue-500/10 text-blue-700 hover:bg-blue-500/20"
+                          }`}
+                          title="Click to toggle who provides the semen"
+                        >
+                          {b.semen_source === "customer" ? "Customer supplied" : "CATL provides"}
+                        </button>
                       </TableCell>
                       <TableCell className="text-right">{b.units}</TableCell>
                     </TableRow>
@@ -1148,6 +1178,7 @@ const ProjectDetail = () => {
             name: b.bulls_catalog ? b.bulls_catalog.bull_name : b.custom_bull_name ?? "",
             catalogId: b.bull_catalog_id,
             units: b.units,
+            semenSource: b.semen_source,
           })),
         } : null}
       />

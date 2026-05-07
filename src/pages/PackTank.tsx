@@ -304,40 +304,38 @@ const PackTank = () => {
 
   const loadInventorySummary = async (projectId: string) => {
     if (!orgId) return;
-    const { data: projBulls, error } = await supabase
-      .from("project_bulls")
-      .select("bull_catalog_id, custom_bull_name, units, bulls_catalog(bull_name, naab_code)")
-      .eq("project_id", projectId);
+    const [{ data: proj }, { data: projBulls, error }] = await Promise.all([
+      supabase.from("projects").select("customer_id").eq("id", projectId).maybeSingle(),
+      supabase
+        .from("project_bulls")
+        .select("bull_catalog_id, custom_bull_name, units, semen_source, bulls_catalog(bull_name, naab_code)")
+        .eq("project_id", projectId),
+    ]);
     if (error || !projBulls) return;
+    const projCustomerId = (proj as any)?.customer_id ?? null;
 
     const summary: Record<string, { bullName: string; locations: { tankName: string; canister: string; units: number }[] }> = {};
 
     for (const pb of projBulls) {
       const bullName = getBullDisplayName(pb as any);
       const bullKey = (pb as any).bull_catalog_id || bullName;
+      const isCustomerSupplied = (pb as any).semen_source === "customer";
 
-      let invRows: any[] = [];
-      if ((pb as any).bull_catalog_id) {
-        const { data } = await supabase
-          .from("tank_inventory")
-          .select("canister, units, customer_id, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("bull_catalog_id", (pb as any).bull_catalog_id)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false });
-        invRows = data ?? [];
+      let q = supabase
+        .from("tank_inventory")
+        .select("canister, units, customer_id, tanks!inner(tank_name, tank_number)")
+        .eq("organization_id", orgId)
+        .gt("units", 0)
+        .order("units", { ascending: false });
+      if ((pb as any).bull_catalog_id) q = q.eq("bull_catalog_id", (pb as any).bull_catalog_id);
+      else q = q.eq("custom_bull_name", bullName);
+      if (isCustomerSupplied && projCustomerId) {
+        q = q.eq("customer_id", projCustomerId);
       } else {
-        const { data } = await supabase
-          .from("tank_inventory")
-          .select("canister, units, customer_id, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("custom_bull_name", bullName)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false });
-        invRows = data ?? [];
+        q = q.is("customer_id", null);
       }
+      const { data } = await q;
+      const invRows = data ?? [];
 
       summary[bullKey] = {
         bullName,
@@ -361,67 +359,57 @@ const PackTank = () => {
   const autoFillFromProject = async (projectId: string) => {
     if (!orgId) return;
 
-    const { data: projBulls, error } = await supabase
-      .from("project_bulls")
-      .select("bull_catalog_id, custom_bull_name, units, bulls_catalog(bull_name, naab_code)")
-      .eq("project_id", projectId);
+    const [{ data: proj }, { data: projBulls, error }] = await Promise.all([
+      supabase.from("projects").select("customer_id").eq("id", projectId).maybeSingle(),
+      supabase
+        .from("project_bulls")
+        .select("bull_catalog_id, custom_bull_name, units, semen_source, bulls_catalog(bull_name, naab_code)")
+        .eq("project_id", projectId),
+    ]);
 
     if (error || !projBulls || projBulls.length === 0) {
       toast({ title: "No bulls found", description: "This project has no bulls assigned.", variant: "destructive" });
       return;
     }
+    const projCustomerId = (proj as any)?.customer_id ?? null;
 
     const newLines: PackLine[] = [];
+
+    // Helper: pick the best source row for a bull, scoped to either company stock
+    // (semen_source = 'company') or the project customer's own stock (semen_source = 'customer').
+    const pickSource = async (
+      column: "bull_catalog_id" | "bull_code" | "custom_bull_name",
+      value: string,
+      ownership: "company" | "customer"
+    ) => {
+      let q = supabase
+        .from("tank_inventory")
+        .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
+        .eq("organization_id", orgId)
+        .eq(column, value)
+        .gt("units", 0)
+        .order("units", { ascending: false })
+        .limit(1);
+      if (ownership === "customer" && projCustomerId) {
+        q = q.eq("customer_id", projCustomerId);
+      } else {
+        q = q.is("customer_id", null);
+      }
+      const { data } = await q;
+      return data && data.length > 0 ? data[0] : null;
+    };
 
     for (const pb of projBulls) {
       const catalog = pb.bulls_catalog as any;
       const bullName = getBullDisplayName(pb as any);
       const bullCode = catalog?.naab_code || null;
       const bullCatalogId = pb.bull_catalog_id;
+      const ownership: "company" | "customer" = (pb as any).semen_source === "customer" ? "customer" : "company";
 
       let bestSource: any = null;
-
-      // Strategy 1: Match by bull_catalog_id (company-owned only — sourcing for a project pack)
-      if (bullCatalogId) {
-        const { data: invRows } = await supabase
-          .from("tank_inventory")
-          .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("bull_catalog_id", bullCatalogId)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false })
-          .limit(1);
-        if (invRows && invRows.length > 0) bestSource = invRows[0];
-      }
-
-      // Strategy 2: Match by bull_code / NAAB code (company-owned only)
-      if (!bestSource && bullCode) {
-        const { data: invRows } = await supabase
-          .from("tank_inventory")
-          .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("bull_code", bullCode)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false })
-          .limit(1);
-        if (invRows && invRows.length > 0) bestSource = invRows[0];
-      }
-
-      // Strategy 3: Match by custom_bull_name (company-owned only)
-      if (!bestSource) {
-        const { data: invRows } = await supabase
-          .from("tank_inventory")
-          .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("custom_bull_name", bullName)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false })
-          .limit(1);
-        if (invRows && invRows.length > 0) bestSource = invRows[0];
-      }
+      if (bullCatalogId) bestSource = await pickSource("bull_catalog_id", bullCatalogId, ownership);
+      if (!bestSource && bullCode) bestSource = await pickSource("bull_code", bullCode, ownership);
+      if (!bestSource) bestSource = await pickSource("custom_bull_name", bullName, ownership);
 
       newLines.push({
         key: crypto.randomUUID(),
