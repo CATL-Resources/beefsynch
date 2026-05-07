@@ -67,7 +67,6 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
   const [orderDate, setOrderDate] = useState<Date>(new Date());
   const [neededBy, setNeededBy] = useState<Date | null>(null);
   const [neededByOpen, setNeededByOpen] = useState(false);
-  const [fulfillmentStatus, setFulfillmentStatus] = useState("pending");
   const [billingStatus, setBillingStatus] = useState("unbilled");
   const [inventoryOwner, setInventoryOwner] = useState<"Select" | "CATL" | null>(null);
   const [notes, setNotes] = useState("");
@@ -112,7 +111,6 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
       setCustomerId(editData.customer_id ?? null);
       setOrderDate(new Date(editData.order_date + "T12:00:00"));
       setNeededBy((editData as any).needed_by ? new Date((editData as any).needed_by + "T12:00:00") : null);
-      setFulfillmentStatus(editData.fulfillment_status);
       setBillingStatus(editData.billing_status);
       setInventoryOwner((editData.inventory_owner as "Select" | "CATL" | null) ?? null);
       setSemenCompanyId(editData.semen_company_id ?? "none");
@@ -143,7 +141,6 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
       setCustomerId(null);
       setOrderDate(new Date());
       setNeededBy(null);
-      setFulfillmentStatus("pending");
       setBillingStatus("unbilled");
       setInventoryOwner(null);
       setSemenCompanyId("none");
@@ -205,7 +202,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
         customer_id: customerId || null,
         order_date: format(orderDate, "yyyy-MM-dd"),
         needed_by: neededBy ? format(neededBy, "yyyy-MM-dd") : null,
-        fulfillment_status: fulfillmentStatus,
+        fulfillment_status: isEditing && editData ? editData.fulfillment_status : "pending",
         billing_status: billingStatus,
         project_id: null,
         inventory_owner: orderType === "inventory" ? inventoryOwner : null,
@@ -464,21 +461,6 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
             <TeamMemberSelect value={placedBy} onValueChange={setPlacedBy} placeholder="Who placed this order?" />
           </div>
 
-          {/* Status dropdowns */}
-          <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
-            <Label className="text-right text-sm">Fulfillment</Label>
-            <Select value={fulfillmentStatus} onValueChange={setFulfillmentStatus}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="backordered">Backordered</SelectItem>
-                <SelectItem value="partially_fulfilled">Partially Fulfilled</SelectItem>
-                <SelectItem value="ordered">Ordered</SelectItem>
-                <SelectItem value="shipped">Shipped</SelectItem>
-                <SelectItem value="fulfilled">Fulfilled</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
           <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
             <Label className="text-right text-sm">Billing</Label>
             <Select value={billingStatus} onValueChange={setBillingStatus}>
