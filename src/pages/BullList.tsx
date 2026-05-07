@@ -26,7 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, ArrowUp, ArrowDown, ArrowLeft, Download, Star, ExternalLink, Plus } from "lucide-react";
+import { Search, ArrowUp, ArrowDown, ArrowLeft, Download, Star, ExternalLink, Plus, Pencil } from "lucide-react";
 import { Toggle } from "@/components/ui/toggle";
 import ClickableRegNumber from "@/components/ClickableRegNumber";
 import { toast } from "@/hooks/use-toast";
@@ -481,21 +481,34 @@ const BullList = () => {
               <Badge variant="secondary" className="text-[9px] px-1 py-0 bg-muted text-muted-foreground">Custom</Badge>
             )}
           </div>
-          <Badge
-            variant="secondary"
-            className={`text-[10px] px-1.5 py-0 shrink-0 ${
-              ({
-                ABS: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-                "ST Genetics": "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-                "Select Sires": "bg-amber-500/20 text-amber-300 border-amber-500/30",
-                Genex: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-                Custom: "bg-gray-500/20 text-gray-300 border-gray-500/30",
-                Universal: "bg-rose-500/20 text-rose-300 border-rose-500/30",
-              } as Record<string, string>)[bull.company || ""] ?? ""
-            }`}
-          >
-            {bull.company || "Custom"}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge
+              variant="secondary"
+              className={`text-[10px] px-1.5 py-0 shrink-0 ${
+                ({
+                  ABS: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+                  "ST Genetics": "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+                  "Select Sires": "bg-amber-500/20 text-amber-300 border-amber-500/30",
+                  Genex: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+                  Custom: "bg-gray-500/20 text-gray-300 border-gray-500/30",
+                  Universal: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+                } as Record<string, string>)[bull.company || ""] ?? ""
+              }`}
+            >
+              {bull.company || "Custom"}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={(e) => {
+                e.stopPropagation();
+                openEditBull(bull);
+              }}
+            >
+              <Pencil className="h-3 w-3 text-muted-foreground" />
+            </Button>
+          </div>
         </div>
         <div className={`flex items-center gap-2 mt-0.5 ${activeTab === "all" ? "pl-10" : "pl-6"}`}>
           <ClickableRegNumber registrationNumber={bull.registration_number || ""} breed={bull.breed || ""} />
@@ -562,6 +575,19 @@ const BullList = () => {
           >
             {bull.company || "Custom"}
           </Badge>
+        </TableCell>
+        <TableCell className="w-10 text-right">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={(e) => {
+              e.stopPropagation();
+              openEditBull(bull);
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
         </TableCell>
       </TableRow>
     );
@@ -752,18 +778,19 @@ const BullList = () => {
                           <SortIcon col={key} />
                         </TableHead>
                       ))}
+                      <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                           Loading bulls...
                         </TableCell>
                       </TableRow>
                     ) : filtered.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                           No bulls found.
                         </TableCell>
                       </TableRow>
