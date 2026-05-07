@@ -8,6 +8,7 @@ import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
 import StatCard from "@/components/StatCard";
 import BullCombobox from "@/components/BullCombobox";
+import NewOrderDialog from "@/components/NewOrderDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { generateCustomerInventoryPdf } from "@/lib/generateCustomerInventoryPdf";
 import { getBullDisplayName } from "@/lib/bullDisplay";
@@ -61,6 +62,7 @@ const CustomerDetail = () => {
 
   // Edit customer dialog
   const [editOpen, setEditOpen] = useState(false);
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
   const [deletingCustomer, setDeletingCustomer] = useState(false);
   const [formName, setFormName] = useState("");
   const [formCompanyName, setFormCompanyName] = useState("");
@@ -1116,7 +1118,17 @@ const CustomerDetail = () => {
 
           {/* Recent Orders */}
           <div className="rounded-lg border border-border/50 overflow-hidden">
-            <div className="px-4 py-2.5 bg-muted/30 font-medium text-sm">Recent Orders</div>
+            <div className="px-4 py-2.5 bg-muted/30 font-medium text-sm flex items-center justify-between">
+              Recent Orders
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setNewOrderOpen(true)}
+              >
+                + New Order
+              </Button>
+            </div>
             {customerOrders.length === 0 ? (
               <p className="px-4 py-4 text-sm text-muted-foreground">No orders found for this customer</p>
             ) : (
@@ -1393,6 +1405,15 @@ const CustomerDetail = () => {
             queryClient.invalidateQueries({ queryKey: ["customer_inventory"] });
             queryClient.invalidateQueries({ queryKey: ["tank_map"] });
           }}
+        />
+      )}
+
+      {customer && (
+        <NewOrderDialog
+          open={newOrderOpen}
+          onOpenChange={setNewOrderOpen}
+          initialOrderType="customer"
+          initialCustomerId={customer.id}
         />
       )}
 

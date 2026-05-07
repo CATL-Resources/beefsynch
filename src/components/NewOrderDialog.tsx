@@ -54,9 +54,10 @@ interface NewOrderDialogProps {
   onOpenChange: (open: boolean) => void;
   editData?: EditOrderData | null;
   initialOrderType?: "customer" | "inventory";
+  initialCustomerId?: string | null;
 }
 
-const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewOrderDialogProps) => {
+const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initialCustomerId }: NewOrderDialogProps) => {
   const { orgId } = useOrgRole();
   const queryClient = useQueryClient();
   const isEditing = !!editData;
@@ -138,7 +139,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
         setSupplyLines([]);
       }
     } else {
-      setCustomerId(null);
+      setCustomerId(initialCustomerId ?? null);
       setOrderDate(new Date());
       setNeededBy(null);
       setBillingStatus("unbilled");
@@ -152,7 +153,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
       setAddingCompany(false);
       setNewCompanyName("");
     }
-  }, [open, editData]);
+  }, [open, editData, initialCustomerId]);
 
   const addBullRow = () => setBulls((prev) => [...prev, { name: "", catalogId: null, naabCode: null, units: "" }]);
   const removeBullRow = (i: number) => setBulls((prev) => prev.filter((_, idx) => idx !== i));
