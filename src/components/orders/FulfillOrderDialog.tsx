@@ -25,6 +25,7 @@ interface FulfillLine {
 interface FulfillOrderDialogProps {
   orderId: string;
   customerName: string;
+  customerId?: string | null;
   organizationId: string;
   lines: FulfillLine[];
   trigger: React.ReactNode;
@@ -58,6 +59,7 @@ const DELIVERY_METHODS = [
 export const FulfillOrderDialog = ({
   orderId,
   customerName,
+  customerId,
   organizationId,
   lines,
   trigger,
@@ -70,6 +72,9 @@ export const FulfillOrderDialog = ({
 
   const [inventoryByBull, setInventoryByBull] = useState<Record<string, InventoryLocation[]>>({});
   const [inventoryLoading, setInventoryLoading] = useState(false);
+
+  const [customerTanks, setCustomerTanks] = useState<Array<{ id: string; tank_number: string | number; tank_name: string | null }>>([]);
+  const [destinationTankId, setDestinationTankId] = useState<string>("");
 
   const activeBulls = useMemo(
     () => lines.filter((l) => l.ordered - l.fulfilled > 0),
@@ -89,7 +94,24 @@ export const FulfillOrderDialog = ({
       }))
     );
     setInventoryByBull({});
+    setDestinationTankId("");
   }, [open, lines]);
+
+  // Fetch customer's tanks for the destination picker
+  useEffect(() => {
+    if (!open || !customerId) {
+      setCustomerTanks([]);
+      return;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from("tanks")
+        .select("id, tank_number, tank_name")
+        .eq("customer_id", customerId)
+        .order("tank_number");
+      setCustomerTanks((data ?? []) as Array<{ id: string; tank_number: string | number; tank_name: string | null }>);
+    })();
+  }, [open, customerId]);
 
   // Fetch inventory locations for each bull when dialog opens
   useEffect(() => {
@@ -204,6 +226,7 @@ export const FulfillOrderDialog = ({
           source_canister: ls.canister || null,
           is_billable: ls.billable,
           notes: deliveryLabel,
+          destination_tank_id: destinationTankId || null,
         },
       });
 
@@ -345,6 +368,31 @@ export const FulfillOrderDialog = ({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {customerId && customerTanks.length > 0 && (
+          <div className="border-t pt-4 space-y-1">
+            <Label className="text-xs">Destination tank (optional)</Label>
+            <Select
+              value={destinationTankId || "none"}
+              onValueChange={(v) => setDestinationTankId(v === "none" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="None — don't track destination" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None — don't track destination</SelectItem>
+                {customerTanks.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.tank_name ? `${t.tank_number} — ${t.tank_name}` : String(t.tank_number)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              When set, the units land in {customerName}'s tank as customer-owned inventory (canister 1; reorganize later).
+            </p>
           </div>
         )}
 

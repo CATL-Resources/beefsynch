@@ -41,6 +41,29 @@ export function getBullDisplayName(row: BullNameSource | null | undefined): stri
 }
 
 /**
+ * Get the NAAB code for a bull-holding row.
+ * Prefers bulls_catalog.naab_code (source of truth), falls back to bull_code on the row.
+ */
+export function getBullDisplayCode(row: BullNameSource | null | undefined): string | null {
+  if (!row) return null;
+  const catalog = row.bulls_catalog ?? row.bull_catalog;
+  const code = catalog?.naab_code?.trim() || row.bull_code?.trim() || "";
+  return code || null;
+}
+
+/**
+ * Get the display label "Name (CODE)" — name first, NAAB code in parens when available.
+ * If there's no code, just the name. If the name and code are the same (e.g. custom bulls
+ * stored under their code), only the name is returned.
+ */
+export function getBullDisplayLabel(row: BullNameSource | null | undefined): string {
+  const name = getBullDisplayName(row);
+  const code = getBullDisplayCode(row);
+  if (!code || code === name) return name;
+  return `${name} (${code})`;
+}
+
+/**
  * Check whether a bull-holding row matches a free-text search query.
  * Returns true for empty queries (so the search bar being empty means
  * "show everything"). Matches case-insensitively against: custom name,

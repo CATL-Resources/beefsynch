@@ -12,7 +12,7 @@ import {
 import { ChevronDown, ChevronRight, Droplets, Sun } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { getBadgeClass } from "@/lib/badgeStyles";
 
 interface TankData {
@@ -300,7 +300,7 @@ export default function CustomerTankCard({
                         {(txn.transaction_type || "").replace(/_/g, " ")}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {getBullDisplayName(txn)}
+                        {getBullDisplayLabel(txn)}
                       </TableCell>
                       <TableCell
                         className={cn(

@@ -796,6 +796,47 @@ const ProjectBilling = () => {
     saveSemenLine(idx, { invoiced: nowInvoiced, invoiced_at: nowInvoiced ? new Date().toISOString() : null });
   }
 
+  async function markBillingInvoiced() {
+    if (!billingId) return;
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("project_billing")
+      .update({ status: "invoiced_closed", billing_completed_at: now })
+      .eq("id", billingId);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    setBillingRecord((prev: any) => ({ ...prev, status: "invoiced_closed", billing_completed_at: now }));
+    setProject((prev: any) => prev ? { ...prev, status: "Invoiced" } : prev);
+    toast({ title: "Marked invoiced & closed" });
+  }
+
+  async function revertBillingInvoiced() {
+    if (!billingId || !projectId) return;
+    if (!window.confirm("Are you sure? This will move the project back to Work Complete and reopen the billing.")) return;
+    const { error: bErr } = await supabase
+      .from("project_billing")
+      .update({ status: "work_complete", billing_completed_at: null })
+      .eq("id", billingId);
+    if (bErr) {
+      toast({ title: "Error", description: bErr.message, variant: "destructive" });
+      return;
+    }
+    // The trigger guards against rolling project status back from Invoiced, so do it manually.
+    const { error: pErr } = await supabase
+      .from("projects")
+      .update({ status: "Work Complete" })
+      .eq("id", projectId);
+    if (pErr) {
+      toast({ title: "Error", description: pErr.message, variant: "destructive" });
+      return;
+    }
+    setBillingRecord((prev: any) => ({ ...prev, status: "work_complete", billing_completed_at: null }));
+    setProject((prev: any) => prev ? { ...prev, status: "Work Complete" } : prev);
+    toast({ title: "Reverted to Work Complete" });
+  }
+
   async function closeOutProject() {
     if (!billingId) return;
     const now = new Date().toISOString();
@@ -993,6 +1034,16 @@ const ProjectBilling = () => {
             <span className={`px-3 py-1.5 rounded-full text-xs font-medium ${STATUS_COLORS[currentStatus] || "bg-muted text-muted-foreground"}`}>
               {STATUS_LABELS[currentStatus] || currentStatus}
             </span>
+            {currentStatus === "work_complete" && (
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={markBillingInvoiced}>
+                Mark Invoiced
+              </Button>
+            )}
+            {currentStatus === "invoiced_closed" && (
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={revertBillingInvoiced}>
+                Revert to Work Complete
+              </Button>
+            )}
             <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setEditProjectOpen(true)} title="Edit Project">
               <Pencil className="h-4 w-4" />
             </Button>

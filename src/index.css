@@ -92,3 +92,23 @@ input[type="number"]::-webkit-inner-spin-button {
 input[type="number"] {
   -moz-appearance: textfield;
 }
+
+
+/* ── Print: hide everything except the print sheet ── */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+  .print-sheet {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0.5in;
+    background: white;
+    color: black;
+  }
+}

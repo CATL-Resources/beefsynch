@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { format, parseISO, addDays, startOfDay } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -271,7 +271,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         // The RPC already correctly counts packs + direct sales + withdrawals.
         const filled = billableTotalById.get(o.id) ?? 0;
         const bullSummary = items
-          .map((i: any) => `${i.units} ${getBullDisplayName(i)}`)
+          .map((i: any) => `${i.units} ${getBullDisplayLabel(i)}`)
           .join(" + ");
         return {
           id: o.id,
@@ -664,7 +664,12 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       {readyToInvoice.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold font-display">Ready to invoice</h2>
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-lg font-semibold font-display">Ready to invoice</h2>
+              <Link to="/billable" className="text-xs text-primary hover:underline">
+                Open full report →
+              </Link>
+            </div>
             <span className="text-sm text-muted-foreground">
               {readyToInvoice.length} item{readyToInvoice.length !== 1 ? "s" : ""}
             </span>

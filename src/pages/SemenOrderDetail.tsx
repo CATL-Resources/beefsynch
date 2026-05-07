@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, FileDown, Pencil, Trash2, Loader2, Package } from "lucide-react";
+import { ArrowLeft, FileDown, Pencil, Trash2, Loader2, Package, Printer } from "lucide-react";
+import { OrderPrintSheet } from "@/components/orders/OrderPrintSheet";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { FulfillOrderDialog } from "@/components/orders/FulfillOrderDialog";
 import NewOrderDialog, { EditOrderData } from "@/components/NewOrderDialog";
@@ -272,6 +273,35 @@ const SemenOrderDetail = () => {
     }
   };
 
+  const markOrderInvoiced = async () => {
+    if (!order) return;
+    const { error } = await supabase
+      .from("semen_orders")
+      .update({ invoiced_at: new Date().toISOString(), billing_status: "invoiced" })
+      .eq("id", order.id);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Order marked invoiced" });
+    load();
+  };
+
+  const revertOrderInvoiced = async () => {
+    if (!order) return;
+    if (!window.confirm("Are you sure? This will move the order back to the billable queue.")) return;
+    const { error } = await supabase
+      .from("semen_orders")
+      .update({ invoiced_at: null, billing_status: "unbilled" })
+      .eq("id", order.id);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Reverted to unbilled" });
+    load();
+  };
+
   const getEditData = (): EditOrderData | null => {
     if (!order) return null;
     return {
@@ -392,6 +422,9 @@ const SemenOrderDetail = () => {
             <Button variant="outline" size="sm" onClick={handleExportPdf}>
               <FileDown className="h-4 w-4 mr-1" /> Export PDF
             </Button>
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <Printer className="h-4 w-4 mr-1" /> Print Bill
+            </Button>
             {!["fulfilled", "cancelled"].includes(order.fulfillment_status) ? (
               <>
                 <Button variant="outline" size="sm" onClick={openEdit}>
@@ -457,6 +490,22 @@ const SemenOrderDetail = () => {
                 #{order.invoice_number}
               </Badge>
             )}
+            {order.invoiced_at ? (
+              <span className="inline-flex items-center gap-2 text-xs text-emerald-600">
+                <span>Invoiced {format(parseISO(order.invoiced_at), "MMM d, yyyy")}</span>
+                <button
+                  type="button"
+                  onClick={revertOrderInvoiced}
+                  className="text-muted-foreground hover:text-destructive underline"
+                >
+                  Revert
+                </button>
+              </span>
+            ) : (
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={markOrderInvoiced}>
+                Mark Invoiced
+              </Button>
+            )}
           </div>
 
           {order.order_type === "customer" && (() => {
@@ -516,6 +565,7 @@ const SemenOrderDetail = () => {
                   <FulfillOrderDialog
                     orderId={order.id}
                     customerName={customerName}
+                    customerId={order.customer_id}
                     organizationId={orgId!}
                     lines={directSaleLines}
                     trigger={
@@ -945,6 +995,33 @@ const SemenOrderDetail = () => {
             already shown in the "Packed for this Order" card above. */}
         {id && order?.order_type === "inventory" && <OrderShipmentReconciliation orderId={id} />}
       </div>
+
+      {/* Print-only billing sheet. Hidden on screen, revealed by window.print() via @media print rules in index.css. */}
+      <OrderPrintSheet
+        order={order}
+        items={items}
+        customerName={customerName}
+        fulfilledByBull={(() => {
+          const m = new Map<string, number>();
+          for (const link of packData || []) {
+            const pack = link.tank_packs;
+            if (!pack) continue;
+            const returnsByBull = unpackReturnsByBull(pack.tank_unpack_lines || []);
+            for (const pl of (pack.tank_pack_lines || [])) {
+              const k = pl.bull_catalog_id || pl.bull_name || "";
+              if (!k) continue;
+              const used = Math.max(0, (pl.units || 0) - (returnsByBull.get(k) || 0));
+              m.set(k, (m.get(k) || 0) + used);
+            }
+          }
+          for (const txn of directSaleTxns) {
+            const k = txn.bull_catalog_id || txn.custom_bull_name || "";
+            const used = Math.abs(txn.units_change || 0);
+            m.set(k, (m.get(k) || 0) + used);
+          }
+          return m;
+        })()}
+      />
 
       <NewOrderDialog
         open={editOpen}

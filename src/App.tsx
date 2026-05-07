@@ -19,6 +19,7 @@ const BullList = lazy(() => import("./pages/BullList"));
 
 const BullChat = lazy(() => import("./pages/BullChat"));
 const SemenOrderDetail = lazy(() => import("./pages/SemenOrderDetail"));
+const Billable = lazy(() => import("./pages/Billable"));
 const Customers = lazy(() => import("./pages/Customers"));
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const Companies = lazy(() => import("./pages/Companies"));
@@ -103,6 +104,7 @@ const App = () => (
                 <Route path="/calendar" element={<ProtectedRoute><MasterCalendar /></ProtectedRoute>} />
                 <Route path="/bulls" element={<ProtectedRoute><BullList /></ProtectedRoute>} />
                 <Route path="/semen-orders/:id" element={<ProtectedRoute><SemenOrderDetail /></ProtectedRoute>} />
+                <Route path="/billable" element={<ProtectedRoute><Billable /></ProtectedRoute>} />
                 <Route path="/bull-report" element={<Navigate to="/operations?tab=inventory" replace />} />
                 <Route path="/chat" element={<ProtectedRoute><BullChat /></ProtectedRoute>} />
                 <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />

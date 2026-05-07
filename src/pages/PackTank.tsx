@@ -13,7 +13,7 @@ import BackButton from "@/components/BackButton";
 import InventoryBullPicker from "@/components/InventoryBullPicker";
 import TeamMemberSelect from "@/components/TeamMemberSelect";
 import { supabase } from "@/integrations/supabase/client";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { generateTankLabelPdf } from "@/lib/generateTankLabelPdf";
@@ -1136,7 +1136,7 @@ const PackTank = () => {
                                   </span>
                                 </span>
                                 <span className="block text-xs text-muted-foreground truncate max-w-[280px]">
-                                  {(o.semen_order_items || []).map((i: any) => `${getBullDisplayName(i)} ×${i.units}`).join(", ") || "No items"}
+                                  {(o.semen_order_items || []).map((i: any) => `${getBullDisplayLabel(i)} ×${i.units}`).join(", ") || "No items"}
                                 </span>
                               </span>
                               <Badge variant="outline" className="text-[10px] px-1 py-0">{o.fulfillment_status}</Badge>
@@ -1295,7 +1295,7 @@ const PackTank = () => {
                                       <span className="text-muted-foreground ml-1 text-xs">{totalUnits} units</span>
                                     </span>
                                     <span className="block text-xs text-muted-foreground truncate max-w-[280px]">
-                                      {(o.semen_order_items || []).map((i: any) => `${getBullDisplayName(i)} ×${i.units}`).join(", ") || "No items"}
+                                      {(o.semen_order_items || []).map((i: any) => `${getBullDisplayLabel(i)} ×${i.units}`).join(", ") || "No items"}
                                     </span>
                                   </span>
                                   <Badge variant="outline" className="text-[10px] px-1 py-0">{o.fulfillment_status}</Badge>

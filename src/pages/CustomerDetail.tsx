@@ -1039,7 +1039,7 @@ const CustomerDetail = () => {
                               <TableRow key={txn.id}>
                                 <TableCell className="text-sm">{format(new Date(txn.created_at), "MMM d, yyyy")}</TableCell>
                                 <TableCell className="text-sm capitalize">{(txn.transaction_type || "").replace(/_/g, " ")}</TableCell>
-                                <TableCell className="text-sm">{getBullDisplayName(txn)}</TableCell>
+                                <TableCell className="text-sm">{getBullDisplayLabel(txn)}</TableCell>
                                 <TableCell className={cn("text-right text-sm font-medium", txn.units_change > 0 ? "text-primary" : "text-destructive")}>
                                   {txn.units_change > 0 ? "+" : ""}{txn.units_change}
                                 </TableCell>
