@@ -375,9 +375,11 @@ const SemenOrderDetail = () => {
         billing_status: order.billing_status,
         notes: order.notes,
         project_name: project?.name || null,
-        bills_through: order.invoicing_company_id === "630b12de-74bc-407a-8ee5-1ea17df18881" ? "Select Sires" : order.invoicing_company_id ? "CATL Resources" : null,
       },
-      items,
+      items.map((item: any) => ({
+        ...item,
+        bills_through: item.semen_companies?.name || null,
+      })),
       reconData,
       supplyItems,
     );
