@@ -1,6 +1,20 @@
 import { createRoot } from "react-dom/client";
+import * as Sentry from "@sentry/react";
 import App from "./App.tsx";
 import "./index.css";
+
+// Sentry: initialize only when a DSN is present in the build env. Until the
+// VITE_SENTRY_DSN var is set in Vercel, this is a no-op — no traffic, no
+// breakage. Once set on the next deploy, error and trace ingestion turns on.
+const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: import.meta.env.MODE,
+    integrations: [Sentry.browserTracingIntegration()],
+    tracesSampleRate: 0.1,
+  });
+}
 
 // After a Lovable redeploy, the running tab still references the old chunk hashes.
 // When the user navigates to a lazy-loaded route, Vite fails to fetch the dynamic
