@@ -670,6 +670,36 @@ export type Database = {
           },
         ]
       }
+      edge_function_health_log: {
+        Row: {
+          checked_at: string
+          function_name: string
+          id: number
+          notes: string | null
+          ok: boolean
+          response_ms: number | null
+          status_code: number | null
+        }
+        Insert: {
+          checked_at?: string
+          function_name: string
+          id?: number
+          notes?: string | null
+          ok: boolean
+          response_ms?: number | null
+          status_code?: number | null
+        }
+        Update: {
+          checked_at?: string
+          function_name?: string
+          id?: number
+          notes?: string | null
+          ok?: boolean
+          response_ms?: number | null
+          status_code?: number | null
+        }
+        Relationships: []
+      }
       google_calendar_events: {
         Row: {
           google_calendar_id: string
@@ -1934,7 +1964,8 @@ export type Database = {
           manually_closed_reason: string | null
           needed_by: string | null
           notes: string | null
-          order_date: string
+          order_date: string | null
+          order_status: string
           order_type: string
           organization_id: string
           placed_by: string | null
@@ -1968,7 +1999,8 @@ export type Database = {
           manually_closed_reason?: string | null
           needed_by?: string | null
           notes?: string | null
-          order_date?: string
+          order_date?: string | null
+          order_status?: string
           order_type?: string
           organization_id: string
           placed_by?: string | null
@@ -2002,7 +2034,8 @@ export type Database = {
           manually_closed_reason?: string | null
           needed_by?: string | null
           notes?: string | null
-          order_date?: string
+          order_date?: string | null
+          order_status?: string
           order_type?: string
           organization_id?: string
           placed_by?: string | null
@@ -3178,6 +3211,16 @@ export type Database = {
           details: string
           status: string
           test_name: string
+        }[]
+      }
+      run_health_checks: {
+        Args: never
+        Returns: {
+          check_name: string
+          fail_count: number
+          sample_ids: string
+          sort_order: number
+          status: string
         }[]
       }
       run_workflow_tests: {

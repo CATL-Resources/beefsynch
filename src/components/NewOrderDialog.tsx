@@ -36,7 +36,8 @@ interface BullRow {
 export interface EditOrderData {
   id: string;
   customer_id: string | null;
-  order_date: string;
+  order_date: string | null;
+  order_status?: "not_ordered" | "ordered" | "received";
   fulfillment_status: string;
   billing_status: string;
   project_id: string | null;
@@ -65,7 +66,8 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
 
   // Form state
   const [customerId, setCustomerId] = useState<string | null>(null);
-  const [orderDate, setOrderDate] = useState<Date>(new Date());
+  const [orderStatus, setOrderStatus] = useState<"not_ordered" | "ordered" | "received">("not_ordered");
+  const [orderDate, setOrderDate] = useState<Date | null>(null);
   const [neededBy, setNeededBy] = useState<Date | null>(null);
   const [neededByOpen, setNeededByOpen] = useState(false);
   const [billingStatus, setBillingStatus] = useState("unbilled");
@@ -110,7 +112,8 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
     if (!open) return;
     if (editData) {
       setCustomerId(editData.customer_id ?? null);
-      setOrderDate(new Date(editData.order_date + "T12:00:00"));
+      setOrderStatus(editData.order_status ?? (editData.order_date ? "received" : "not_ordered"));
+      setOrderDate(editData.order_date ? new Date(editData.order_date + "T12:00:00") : null);
       setNeededBy((editData as any).needed_by ? new Date((editData as any).needed_by + "T12:00:00") : null);
       setBillingStatus(editData.billing_status);
       setInventoryOwner((editData.inventory_owner as "Select" | "CATL" | null) ?? null);
@@ -140,7 +143,8 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
       }
     } else {
       setCustomerId(initialCustomerId ?? null);
-      setOrderDate(new Date());
+      setOrderStatus("not_ordered");
+      setOrderDate(null);
       setNeededBy(null);
       setBillingStatus("unbilled");
       setInventoryOwner(null);
@@ -201,7 +205,8 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
       const orderPayload: any = {
         organization_id: orgId,
         customer_id: customerId || null,
-        order_date: format(orderDate, "yyyy-MM-dd"),
+        order_status: orderStatus,
+        order_date: orderStatus === "not_ordered" || !orderDate ? null : format(orderDate, "yyyy-MM-dd"),
         needed_by: neededBy ? format(neededBy, "yyyy-MM-dd") : null,
         fulfillment_status: isEditing && editData ? editData.fulfillment_status : "pending",
         billing_status: billingStatus,
@@ -401,26 +406,53 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
             </div>
           </div>
 
-          {/* Order Date */}
+          {/* Order Status */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
-            <Label className="text-right text-sm">Order Date</Label>
-            <Popover open={dateOpen} onOpenChange={setDateOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className={cn("w-full justify-start text-left font-normal")}>
-                  {format(orderDate, "PPP")}
-                  <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={orderDate}
-                  onSelect={(d) => { if (d) setOrderDate(d); setDateOpen(false); }}
-                  className="p-3 pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
+            <Label className="text-right text-sm">Order Status</Label>
+            <Select
+              value={orderStatus}
+              onValueChange={(v) => {
+                const next = v as "not_ordered" | "ordered" | "received";
+                setOrderStatus(next);
+                if (next === "not_ordered") {
+                  setOrderDate(null);
+                } else if (!orderDate) {
+                  // Pre-fill today on first transition into ordered/received
+                  setOrderDate(new Date());
+                }
+              }}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="not_ordered">Not Ordered</SelectItem>
+                <SelectItem value="ordered">Ordered</SelectItem>
+                <SelectItem value="received">Received</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+
+          {/* Order Date — only when status is ordered or received */}
+          {orderStatus !== "not_ordered" && (
+            <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
+              <Label className="text-right text-sm">Order Date</Label>
+              <Popover open={dateOpen} onOpenChange={setDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal")}>
+                    {orderDate ? format(orderDate, "PPP") : <span className="text-muted-foreground">Pick a date</span>}
+                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={orderDate ?? undefined}
+                    onSelect={(d) => { if (d) setOrderDate(d); setDateOpen(false); }}
+                    className="p-3 pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
 
           {/* Needed By (optional) */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">

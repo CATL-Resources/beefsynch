@@ -1238,7 +1238,7 @@ const ReceiveShipment = () => {
                     {orders.map((o: any) => (
                       <SelectItem key={o.id} value={o.id}>
                         <span className="flex items-center gap-2">
-                          {o.customers?.name || (o.order_type === "inventory" ? (o.placed_by ? `Inventory — ${o.placed_by}` : "Inventory Order") : "—")} — {format(new Date(o.order_date + "T00:00:00"), "MMM d, yyyy")}
+                          {o.customers?.name || (o.order_type === "inventory" ? (o.placed_by ? `Inventory — ${o.placed_by}` : "Inventory Order") : "—")} — {o.order_date ? format(new Date(o.order_date + "T00:00:00"), "MMM d, yyyy") : "—"}
                           {alreadyReceivedStatuses.includes(o.fulfillment_status) && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
                               ✓ {o.fulfillment_status.replace(/_/g, " ")}

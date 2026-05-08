@@ -77,7 +77,7 @@ const FulfillOrder = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [order, setOrder] = useState<{ id: string; customer_id: string | null; customer_name: string; order_date: string; fulfillment_status: string } | null>(null);
+  const [order, setOrder] = useState<{ id: string; customer_id: string | null; customer_name: string; order_date: string | null; fulfillment_status: string } | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
   // bullCatalogId (or custom_bull_name) → fulfilled units (from prior direct sales)
   const [fulfilledByBull, setFulfilledByBull] = useState<Map<string, number>>(new Map());
@@ -427,7 +427,7 @@ const FulfillOrder = () => {
         <div>
           <h1 className="text-2xl font-bold font-display tracking-tight">Fulfill Order — {order.customer_name}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Order Date: {format(parseISO(order.order_date), "MMMM d, yyyy")} · Status: {order.fulfillment_status.replace(/_/g, " ")}
+            Order Date: {order.order_date ? format(parseISO(order.order_date), "MMMM d, yyyy") : "—"} · Status: {order.fulfillment_status.replace(/_/g, " ")}
           </p>
         </div>
 

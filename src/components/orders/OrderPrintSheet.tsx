@@ -4,7 +4,7 @@ import { getBullDisplayLabel } from "@/lib/bullDisplay";
 interface OrderPrintSheetProps {
   order: {
     id: string;
-    order_date: string;
+    order_date: string | null;
     notes: string | null;
     invoiced_at: string | null;
     invoice_number: string | null;
@@ -53,7 +53,7 @@ export function OrderPrintSheet({ order, items, fulfilledByBull, customerName }:
             <div className="font-semibold">{customerName}</div>
             {order.customers?.phone && <div>{order.customers.phone}</div>}
             {order.customers?.email && <div>{order.customers.email}</div>}
-            <div className="mt-2 text-gray-700">Order date: {format(parseISO(order.order_date), "MMMM d, yyyy")}</div>
+            <div className="mt-2 text-gray-700">Order date: {order.order_date ? format(parseISO(order.order_date), "MMMM d, yyyy") : "—"}</div>
           </div>
         </div>
 

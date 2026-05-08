@@ -33,7 +33,8 @@ import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 interface OrderRow {
   id: string;
   customer_id: string | null;
-  order_date: string;
+  order_date: string | null;
+  order_status: "not_ordered" | "ordered" | "received";
   fulfillment_status: string;
   billing_status: string;
   project_id: string | null;
@@ -308,6 +309,7 @@ const SemenOrderDetail = () => {
       id: order.id,
       customer_id: order.customer_id,
       order_date: order.order_date,
+      order_status: order.order_status,
       fulfillment_status: order.fulfillment_status,
       billing_status: order.billing_status,
       project_id: order.project_id,
@@ -478,9 +480,22 @@ const SemenOrderDetail = () => {
             )}
           </div>
           <p className="text-muted-foreground text-sm mt-1">
-            Order Date: {format(parseISO(order.order_date), "MMMM d, yyyy")}
+            Order Date: {order.order_date ? format(parseISO(order.order_date), "MMMM d, yyyy") : "—"}
           </p>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <Badge
+              variant="outline"
+              className={cn(
+                "capitalize text-xs",
+                order.order_status === "received"
+                  ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                  : order.order_status === "ordered"
+                    ? "bg-blue-500/15 text-blue-700 border-blue-500/30"
+                    : "bg-muted text-muted-foreground",
+              )}
+            >
+              {order.order_status.replace(/_/g, " ")}
+            </Badge>
             <Badge variant="outline" className={cn("capitalize text-xs", fulfillmentColors[order.fulfillment_status] || "")}>
               {order.fulfillment_status.replace(/_/g, " ")}
             </Badge>
@@ -615,7 +630,7 @@ const SemenOrderDetail = () => {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-muted-foreground shrink-0">Order Date</span>
-              <span className="font-medium">{format(parseISO(order.order_date), "MMMM d, yyyy")}</span>
+              <span className="font-medium">{order.order_date ? format(parseISO(order.order_date), "MMMM d, yyyy") : "—"}</span>
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-muted-foreground shrink-0">Placed By</span>

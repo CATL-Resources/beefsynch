@@ -24,7 +24,7 @@ function invoicingCompanyLabel(id: string | null): string {
 
 interface BillableOrder {
   id: string;
-  order_date: string;
+  order_date: string | null;
   customer_name: string;
   invoicing_company_id: string | null;
   total_units: number;
@@ -194,7 +194,7 @@ const Billable = () => {
                               {o.customer_name}
                             </Link>
                             <div className="text-xs text-muted-foreground truncate">
-                              {format(parseISO(o.order_date), "MMM d, yyyy")} · {o.total_units} units · {o.bull_summary || "no items"}
+                              {o.order_date ? format(parseISO(o.order_date), "MMM d, yyyy") : "—"} · {o.total_units} units · {o.bull_summary || "no items"}
                             </div>
                           </div>
                           <Button

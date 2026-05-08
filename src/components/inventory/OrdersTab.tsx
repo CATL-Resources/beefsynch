@@ -190,8 +190,12 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
       );
       if (!customerMatch && !bullMatch) return false;
     }
-    if (dateFrom && isBefore(parseISO(o.order_date), dateFrom)) return false;
-    if (dateTo && isAfter(parseISO(o.order_date), dateTo)) return false;
+    if (o.order_date) {
+      if (dateFrom && isBefore(parseISO(o.order_date), dateFrom)) return false;
+      if (dateTo && isAfter(parseISO(o.order_date), dateTo)) return false;
+    } else if (dateFrom || dateTo) {
+      return false;
+    }
     return true;
   }), [scopedOrders, search, dateFrom, dateTo]);
 
@@ -266,7 +270,20 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                 <span className="text-xs text-muted-foreground">{order.semen_companies.name}</span>
               )}
               <span className="text-xs text-muted-foreground">·</span>
-              <span className="text-xs text-muted-foreground">{format(parseISO(order.order_date), "MMM d, yyyy")}</span>
+              <span className="text-xs text-muted-foreground">{order.order_date ? format(parseISO(order.order_date), "MMM d, yyyy") : "—"}</span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "capitalize text-[10px]",
+                  order.order_status === "received"
+                    ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                    : order.order_status === "ordered"
+                      ? "bg-blue-500/15 text-blue-700 border-blue-500/30"
+                      : "bg-muted text-muted-foreground",
+                )}
+              >
+                {(order.order_status || "not_ordered").replace(/_/g, " ")}
+              </Badge>
               <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderFulfillment', order.fulfillment_status))}>
                 {order.fulfillment_status?.replace(/_/g, " ")}
               </Badge>

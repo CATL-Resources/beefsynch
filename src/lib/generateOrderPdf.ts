@@ -16,7 +16,7 @@ import { getBullDisplayName } from "./bullDisplay";
 
 interface OrderData {
   customer_name: string;
-  order_date: string;
+  order_date: string | null;
   fulfillment_status: string;
   billing_status: string;
   notes: string | null;
@@ -77,7 +77,7 @@ export function generateOrderPdf(
   y += 16;
 
   const infoRows: [string, string][] = [
-    ["Order Date", format(parseISO(order.order_date), "MMMM d, yyyy")],
+    ["Order Date", order.order_date ? format(parseISO(order.order_date), "MMMM d, yyyy") : "—"],
     ["Fulfillment", order.fulfillment_status.charAt(0).toUpperCase() + order.fulfillment_status.slice(1)],
     ["Billing", order.billing_status.charAt(0).toUpperCase() + order.billing_status.slice(1)],
   ];
@@ -230,6 +230,6 @@ export function generateOrderPdf(
 
   addFooterToPdf(doc, "BeefSynch by Chuteside, LLC");
 
-  const safeDate = order.order_date.replace(/-/g, "");
+  const safeDate = (order.order_date ?? new Date().toISOString().slice(0, 10)).replace(/-/g, "");
   doc.save(buildPdfFilename("BeefSynch_Order", order.customer_name, safeDate));
 }

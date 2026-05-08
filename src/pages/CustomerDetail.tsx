@@ -1146,7 +1146,7 @@ const CustomerDetail = () => {
                   <TableBody>
                     {customerOrders.map((order: any) => (
                       <TableRow key={order.id} className="cursor-pointer hover:bg-secondary/50" onClick={() => navigate(`/semen-orders/${order.id}`)}>
-                        <TableCell className="text-sm">{format(new Date(order.order_date + "T00:00:00"), "MMM d, yyyy")}</TableCell>
+                        <TableCell className="text-sm">{order.order_date ? format(new Date(order.order_date + "T00:00:00"), "MMM d, yyyy") : "—"}</TableCell>
                         <TableCell className="text-sm">{order.semen_companies?.name || "—"}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={FULFILLMENT_COLORS[order.fulfillment_status] || "bg-muted text-muted-foreground"}>
