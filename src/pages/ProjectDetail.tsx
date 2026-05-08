@@ -5,6 +5,7 @@ import { ArrowLeft, Calendar, FileDown, FileText, Download, Pencil, MoreVertical
 import { Textarea } from "@/components/ui/textarea";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import NewProjectDialog from "@/components/NewProjectDialog";
+import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import CustomerPicker from "@/components/CustomerPicker";
 import { generateProjectPdf } from "@/lib/generateProjectPdf";
 import { generateProjectCsv } from "@/lib/generateProjectCsv";
@@ -115,6 +116,7 @@ const ProjectDetail = () => {
   const [bulls, setBulls] = useState<BullRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
+  const [editBullId, setEditBullId] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Contact history state
@@ -1113,6 +1115,15 @@ const ProjectDetail = () => {
                               return bullDisplay;
                             })()
                           : b.custom_bull_name ?? "Unknown"}
+                        {b.bull_catalog_id && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditBullId(b.bull_catalog_id); }}
+                            className="ml-1.5 inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                            title="Edit bull info"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        )}
                         {b.bulls_catalog?.registration_number && (
                           <div className="mt-0.5">
                             <ClickableRegNumber registrationNumber={b.bulls_catalog.registration_number} breed={b.bulls_catalog.breed} />
@@ -1182,6 +1193,14 @@ const ProjectDetail = () => {
           })),
         } : null}
       />
+
+      {editBullId && (
+        <QuickBullEditDialog
+          open={!!editBullId}
+          onOpenChange={(open) => { if (!open) setEditBullId(null); }}
+          bullCatalogId={editBullId}
+        />
+      )}
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
