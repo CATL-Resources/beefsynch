@@ -429,6 +429,23 @@ const SemenOrderDetail = () => {
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-4 w-4 mr-1" /> Print Bill
             </Button>
+            {!["fulfilled", "cancelled"].includes(order.fulfillment_status) && (
+              <Button
+                size="sm"
+                disabled={items.length === 0}
+                title={
+                  items.length === 0
+                    ? "Add items before fulfilling"
+                    : (order as any).order_status === "not_ordered"
+                      ? "This order has not been placed yet — fulfilling will record a direct sale"
+                      : undefined
+                }
+                variant={(order as any).order_status === "not_ordered" ? "outline" : "default"}
+                onClick={() => navigate(`/semen-orders/${order.id}/fulfill`)}
+              >
+                <Package className="h-4 w-4 mr-1" /> Fulfill Order
+              </Button>
+            )}
             {!["fulfilled", "cancelled"].includes(order.fulfillment_status) ? (
               <>
                 <Button variant="outline" size="sm" onClick={openEdit}>
