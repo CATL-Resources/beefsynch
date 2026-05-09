@@ -29,6 +29,7 @@ import { fulfillmentColors, billingColors } from "@/lib/badgeStyles";
 import { InvoiceOrderModal } from "@/components/orders/InvoiceOrderModal";
 import { MarkFulfilledModal } from "@/components/orders/MarkFulfilledModal";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
+import ReceiveDialog from "@/components/orders/ReceiveDialog";
 
 interface OrderRow {
   id: string;
@@ -55,6 +56,8 @@ interface OrderRow {
 interface ItemRow {
   id: string;
   units: number;
+  units_received: number;
+  item_status: string;
   custom_bull_name: string | null;
   bull_catalog_id: string | null;
   invoicing_company_id: string | null;
@@ -99,6 +102,9 @@ const SemenOrderDetail = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editBullId, setEditBullId] = useState<string | null>(null);
   const [deletingOrder, setDeletingOrder] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [closingOrder, setClosingOrder] = useState(false);
+  const [cancellingItemId, setCancellingItemId] = useState<string | null>(null);
   const [packData, setPackData] = useState<any[]>([]);
   const [directSaleTxns, setDirectSaleTxns] = useState<any[]>([]);
   const [supplyItems, setSupplyItems] = useState<any[]>([]);
@@ -389,6 +395,60 @@ const SemenOrderDetail = () => {
   };
 
   const totalUnits = items.reduce((s, i) => s + (i.units || 0), 0);
+  const isInventory = order?.order_type === "inventory";
+  const hasOpenItems = items.some(
+    (i) => i.item_status === "pending" || i.item_status === "partially_received",
+  );
+
+  const handleCloseOrder = async () => {
+    if (!order) return;
+    setClosingOrder(true);
+    try {
+      const openIds = items
+        .filter((i) => i.item_status === "pending" || i.item_status === "partially_received")
+        .map((i) => i.id);
+      if (openIds.length > 0) {
+        const { error: itemErr } = await supabase
+          .from("semen_order_items")
+          .update({ item_status: "cancelled" })
+          .in("id", openIds);
+        if (itemErr) throw itemErr;
+      }
+      const { data: userData } = await supabase.auth.getUser();
+      const { error: orderErr } = await supabase
+        .from("semen_orders")
+        .update({
+          manually_closed_at: new Date().toISOString(),
+          manually_closed_by: userData.user?.id ?? null,
+          manually_closed_reason: "Closed from order detail",
+        })
+        .eq("id", order.id);
+      if (orderErr) throw orderErr;
+      toast({ title: "Order closed" });
+      load();
+    } catch (err: any) {
+      toast({ title: "Close failed", description: err.message ?? String(err), variant: "destructive" });
+    } finally {
+      setClosingOrder(false);
+    }
+  };
+
+  const handleCancelItem = async (itemId: string) => {
+    setCancellingItemId(itemId);
+    try {
+      const { error } = await supabase
+        .from("semen_order_items")
+        .update({ item_status: "cancelled" })
+        .eq("id", itemId);
+      if (error) throw error;
+      toast({ title: "Line cancelled" });
+      load();
+    } catch (err: any) {
+      toast({ title: "Cancel failed", description: err.message ?? String(err), variant: "destructive" });
+    } finally {
+      setCancellingItemId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -416,20 +476,58 @@ const SemenOrderDetail = () => {
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate(`/receive-shipment?order=${id}`)}
-            >
-              <Package className="h-4 w-4 mr-1" /> Receive Shipment
-            </Button>
+            {!isInventory && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/receive-shipment?order=${id}`)}
+              >
+                <Package className="h-4 w-4 mr-1" /> Receive Shipment
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleExportPdf}>
               <FileDown className="h-4 w-4 mr-1" /> Export PDF
             </Button>
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-4 w-4 mr-1" /> Print Bill
             </Button>
-            {!["fulfilled", "cancelled"].includes(order.fulfillment_status) && (
+            {isInventory && !["fulfilled", "cancelled"].includes(order.fulfillment_status) && (
+              <>
+                <Button
+                  size="sm"
+                  disabled={!hasOpenItems}
+                  onClick={() => setReceiveOpen(true)}
+                >
+                  <Package className="h-4 w-4 mr-1" /> Receive Shipment
+                </Button>
+                {hasOpenItems && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={closingOrder}>
+                        Close Order
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Close this order?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          All remaining pending or partially received lines will be cancelled.
+                          Units already received will not be affected.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleCloseOrder} disabled={closingOrder}>
+                          {closingOrder && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Close Order
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </>
+            )}
+            {!isInventory && !["fulfilled", "cancelled"].includes(order.fulfillment_status) && (
               <Button
                 size="sm"
                 disabled={items.length === 0}
@@ -690,7 +788,105 @@ const SemenOrderDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Bull Summary — unified lifecycle view */}
+        {/* Inventory order — per-item receive/cancel table */}
+        {isInventory && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Order Items</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {items.length === 0 ? (
+                <p className="text-center py-8 text-muted-foreground">No bulls added to this order.</p>
+              ) : (
+                <div className="rounded-lg border border-border/50 overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/30">
+                        <TableHead>Bull</TableHead>
+                        <TableHead>NAAB</TableHead>
+                        <TableHead className="text-right">Ordered</TableHead>
+                        <TableHead className="text-right">Received</TableHead>
+                        <TableHead className="text-right">Pending</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="w-32"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((item) => {
+                        const ordered = item.units || 0;
+                        const received = item.units_received || 0;
+                        const pending = Math.max(0, ordered - received);
+                        const status = item.item_status || "pending";
+                        const isCancelled = status === "cancelled";
+                        const statusBadge =
+                          status === "received"
+                            ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                            : status === "partially_received"
+                              ? "bg-amber-500/15 text-amber-700 border-amber-500/30"
+                              : status === "cancelled"
+                                ? "bg-red-500/15 text-red-700 border-red-500/30"
+                                : "bg-muted text-muted-foreground";
+                        const canCancel = status === "pending" || status === "partially_received";
+                        return (
+                          <TableRow key={item.id} className={isCancelled ? "opacity-50" : ""}>
+                            <TableCell className="font-medium">
+                              {getBullDisplayName(item)}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {item.bulls_catalog?.naab_code ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-right">{ordered}</TableCell>
+                            <TableCell className="text-right">{received}</TableCell>
+                            <TableCell className="text-right">{pending}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={cn("capitalize text-xs", statusBadge)}>
+                                {status.replace(/_/g, " ")}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {canCancel && (
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-xs text-destructive hover:text-destructive"
+                                      disabled={cancellingItemId === item.id}
+                                    >
+                                      Cancel Line
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Cancel this line?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        Cancel remaining {pending} unit{pending === 1 ? "" : "s"} of {getBullDisplayName(item)}?
+                                        {received > 0 && ` Units already received (${received}) will not be affected.`}
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Keep</AlertDialogCancel>
+                                      <AlertDialogAction onClick={() => handleCancelItem(item.id)}>
+                                        Cancel Line
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Bull Summary — unified lifecycle view (customer orders) */}
+        {!isInventory && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Bull Summary</CardTitle>
@@ -972,6 +1168,7 @@ const SemenOrderDetail = () => {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Supplies card */}
         {supplyItems.length > 0 && (
@@ -1064,6 +1261,23 @@ const SemenOrderDetail = () => {
           open={!!editBullId}
           onOpenChange={(open) => { if (!open) setEditBullId(null); }}
           bullCatalogId={editBullId}
+        />
+      )}
+      {isInventory && order && id && (
+        <ReceiveDialog
+          open={receiveOpen}
+          onOpenChange={setReceiveOpen}
+          orderId={id}
+          semenCompanyName={companyName}
+          items={items.map((i) => ({
+            id: i.id,
+            units: i.units,
+            units_received: i.units_received ?? 0,
+            item_status: i.item_status ?? "pending",
+            bull_name: getBullDisplayName(i),
+            naab_code: i.bulls_catalog?.naab_code ?? null,
+          }))}
+          onReceived={() => load()}
         />
       )}
       <AppFooter />

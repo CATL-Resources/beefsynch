@@ -1913,24 +1913,30 @@ export type Database = {
           custom_bull_name: string | null
           id: string
           invoicing_company_id: string | null
+          item_status: string
           semen_order_id: string
           units: number
+          units_received: number
         }
         Insert: {
           bull_catalog_id: string
           custom_bull_name?: string | null
           id?: string
           invoicing_company_id?: string | null
+          item_status?: string
           semen_order_id: string
           units?: number
+          units_received?: number
         }
         Update: {
           bull_catalog_id?: string
           custom_bull_name?: string | null
           id?: string
           invoicing_company_id?: string | null
+          item_status?: string
           semen_order_id?: string
           units?: number
+          units_received?: number
         }
         Relationships: [
           {
@@ -3227,6 +3233,10 @@ export type Database = {
       recalc_order_fulfillment: {
         Args: { _order_id: string }
         Returns: undefined
+      }
+      receive_shipment_items: {
+        Args: { _lines: Json; _order_id: string }
+        Returns: Json
       }
       receive_shipment_v2: { Args: { _input: Json }; Returns: Json }
       record_direct_sale: { Args: { _input: Json }; Returns: Json }
