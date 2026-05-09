@@ -9,6 +9,7 @@ import AppFooter from "@/components/AppFooter";
 import StatCard from "@/components/StatCard";
 import BullCombobox from "@/components/BullCombobox";
 import NewOrderDialog from "@/components/NewOrderDialog";
+import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { generateCustomerInventoryPdf } from "@/lib/generateCustomerInventoryPdf";
 import { getBullDisplayName } from "@/lib/bullDisplay";
@@ -63,6 +64,7 @@ const CustomerDetail = () => {
   // Edit customer dialog
   const [editOpen, setEditOpen] = useState(false);
   const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [editBullId, setEditBullId] = useState<string | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState(false);
   const [formName, setFormName] = useState("");
   const [formCompanyName, setFormCompanyName] = useState("");
@@ -925,7 +927,18 @@ const CustomerDetail = () => {
                             <TableCell>{item.canister}</TableCell>
                             <TableCell>{item.sub_canister || "—"}</TableCell>
                             <TableCell>
-                              {getBullDisplayName(item)}
+                              <span className="inline-flex items-center gap-1">
+                                <span>{getBullDisplayName(item)}</span>
+                                {item.bull_catalog_id && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setEditBullId(item.bull_catalog_id); }}
+                                    className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                                    title="Edit bull info"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </span>
                               {item.item_type === "embryo" && (
                                 <Badge variant="outline" className="ml-2 bg-purple-500/15 text-purple-400 border-purple-500/30 text-xs">Embryo</Badge>
                               )}
@@ -1041,7 +1054,20 @@ const CustomerDetail = () => {
                               <TableRow key={txn.id}>
                                 <TableCell className="text-sm">{format(new Date(txn.created_at), "MMM d, yyyy")}</TableCell>
                                 <TableCell className="text-sm capitalize">{(txn.transaction_type || "").replace(/_/g, " ")}</TableCell>
-                                <TableCell className="text-sm">{getBullDisplayLabel(txn)}</TableCell>
+                                <TableCell className="text-sm">
+                                  <span className="inline-flex items-center gap-1">
+                                    <span>{getBullDisplayLabel(txn)}</span>
+                                    {txn.bull_catalog_id && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setEditBullId(txn.bull_catalog_id); }}
+                                        className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                                        title="Edit bull info"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </button>
+                                    )}
+                                  </span>
+                                </TableCell>
                                 <TableCell className={cn("text-right text-sm font-medium", txn.units_change > 0 ? "text-primary" : "text-destructive")}>
                                   {txn.units_change > 0 ? "+" : ""}{txn.units_change}
                                 </TableCell>
@@ -1414,6 +1440,14 @@ const CustomerDetail = () => {
           onOpenChange={setNewOrderOpen}
           initialOrderType="customer"
           initialCustomerId={customer.id}
+        />
+      )}
+
+      {editBullId && (
+        <QuickBullEditDialog
+          open={!!editBullId}
+          onOpenChange={(open) => { if (!open) setEditBullId(null); }}
+          bullCatalogId={editBullId}
         />
       )}
 
