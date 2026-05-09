@@ -613,7 +613,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           {actions.tanksOut > 0 && (
             <Card
               className="cursor-pointer border-amber-500/40 bg-amber-500/5 transition-colors hover:bg-amber-500/10"
-              onClick={() => onSwitchTab("inventory", { view: "tank", subTab: "out" })}
+              onClick={() => onSwitchTab("tanks", { subTab: "out" })}
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
