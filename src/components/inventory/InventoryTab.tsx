@@ -52,7 +52,7 @@ const STORAGE_BADGES: Record<string, string> = {
   inventory: "bg-purple-500/15 text-purple-400 border-purple-500/30",
 };
 
-type SortKey = "bull_name" | "customer" | "tank" | "units";
+type SortKey = "bull_name" | "breed" | "customer" | "tank" | "units";
 type SortDir = "asc" | "desc";
 
 interface InventoryTabProps {
@@ -70,6 +70,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
   const [search, setSearch] = useState("");
   const [storageFilter, setStorageFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState<string>(initialOwnerFilter);
+  const [breedFilter, setBreedFilter] = useState<string>("all");
   // "available" = company-owned, sellable; "all" = every shelf row including customer-owned.
   // Default to "available" so the dashboard shows what's actually for sale by default.
   const [shelfMode, setShelfMode] = useState<"available" | "all">("available");
@@ -116,7 +117,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       while (true) {
         const { data, error } = await supabase
           .from("tank_inventory")
-          .select("*, customers!tank_inventory_customer_id_fkey(name), tanks!tank_inventory_tank_id_fkey(tank_name, tank_number), bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code)")
+          .select("*, customers!tank_inventory_customer_id_fkey(name), tanks!tank_inventory_tank_id_fkey(tank_name, tank_number), bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code, breed)")
           .eq("organization_id", orgId!)
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -144,6 +145,19 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     },
   });
 
+  const { data: breedOptions = [] } = useQuery({
+    queryKey: ["breeds"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("breeds")
+        .select("name, sort_order")
+        .eq("is_active", true)
+        .order("sort_order");
+      return (data ?? []) as { name: string; sort_order: number }[];
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+
   const { data: customerOptions = [] } = useQuery({
     queryKey: ["customers_for_edit", orgId],
     enabled: !!orgId,
@@ -166,6 +180,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     bullCatalogId: item.bull_catalog_id || null,
     _raw: item,
     bullCode: item.bull_code || "—",
+    breed: item.bulls_catalog?.breed || "",
     customer: item.customers?.name || (item.customer_id ? "Unknown" : "Company"),
     customerId: item.customer_id,
     tankId: item.tank_id,
@@ -186,6 +201,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     // Stats above are computed off the full `rows` set so they always reflect reality.
     if (shelfMode === "available") result = result.filter((r) => !r.customerId);
     if (storageFilter !== "all") result = result.filter((r) => r.storageType === storageFilter);
+    if (breedFilter !== "all") result = result.filter((r) => r.breed === breedFilter);
     if (ownerFilter === "company") {
       result = result.filter((r) => !r.customerId);
     } else if (ownerFilter === "customer") {
@@ -207,6 +223,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       let aVal: string | number, bVal: string | number;
       switch (sortKey) {
         case "bull_name": aVal = a.bullName.toLowerCase(); bVal = b.bullName.toLowerCase(); break;
+        case "breed": aVal = (a.breed || "").toLowerCase(); bVal = (b.breed || "").toLowerCase(); break;
         case "customer": aVal = a.customer.toLowerCase(); bVal = b.customer.toLowerCase(); break;
         case "tank": aVal = a.tankName.toLowerCase(); bVal = b.tankName.toLowerCase(); break;
         case "units": aVal = a.units; bVal = b.units; break;
@@ -217,7 +234,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       return 0;
     });
     return result;
-  }, [rows, shelfMode, storageFilter, ownerFilter, search, sortKey, sortDir]);
+  }, [rows, shelfMode, storageFilter, ownerFilter, breedFilter, search, sortKey, sortDir]);
 
   const groupedByBull = useMemo(() => {
     if (viewMode !== "grouped") return [];
@@ -514,6 +531,17 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
             </SelectContent>
           </Select>
         </div>
+        <div className="w-44">
+          <Select value={breedFilter} onValueChange={setBreedFilter}>
+            <SelectTrigger><SelectValue placeholder="Breed" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Breeds</SelectItem>
+              {breedOptions.map((b) => (
+                <SelectItem key={b.name} value={b.name}>{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="w-36">
           <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); onFilterReset?.(); }}>
             <SelectTrigger><SelectValue placeholder="Owner" /></SelectTrigger>
@@ -561,10 +589,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
               <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow className="bg-muted/30">
-                    <TableHead className="w-[28%]"><SortHeader label="Bull" sortKeyVal="bull_name" /></TableHead>
-                    <TableHead className="w-[22%]"><SortHeader label="Location" sortKeyVal="tank" /></TableHead>
-                    <TableHead className="w-[22%]"><SortHeader label="Owner" sortKeyVal="customer" /></TableHead>
-                    <TableHead className="w-[10%] text-right"><SortHeader label="Units" sortKeyVal="units" /></TableHead>
+                    <TableHead className="w-[24%]"><SortHeader label="Bull" sortKeyVal="bull_name" /></TableHead>
+                    <TableHead className="w-[12%]"><SortHeader label="Breed" sortKeyVal="breed" /></TableHead>
+                    <TableHead className="w-[20%]"><SortHeader label="Location" sortKeyVal="tank" /></TableHead>
+                    <TableHead className="w-[18%]"><SortHeader label="Owner" sortKeyVal="customer" /></TableHead>
+                    <TableHead className="w-[8%] text-right"><SortHeader label="Units" sortKeyVal="units" /></TableHead>
                     <TableHead className="w-[12%]">Storage</TableHead>
                     <TableHead className="w-[6%]" />
                   </TableRow>
@@ -572,7 +601,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                 <TableBody>
                   {filtered.length === 0 && !isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6}>
+                      <TableCell colSpan={7}>
                         <EmptyState
                           icon={Archive}
                           title={rows.length === 0 ? "No inventory data" : "No results"}
@@ -601,6 +630,9 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                               )}
                             </div>
                             <div className="text-xs font-mono text-muted-foreground truncate" title={row.bullCode}>{row.bullCode}</div>
+                          </TableCell>
+                          <TableCell className="align-top text-sm text-muted-foreground">
+                            {row.breed || "—"}
                           </TableCell>
                           <TableCell className="align-top">
                             <div className="truncate" title={`${row.tankName} #${row.tankNumber}`}>
