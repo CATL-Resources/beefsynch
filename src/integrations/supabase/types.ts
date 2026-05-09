@@ -394,6 +394,30 @@ export type Database = {
           },
         ]
       }
+      breeds: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       bull_company_offerings: {
         Row: {
           active: boolean
@@ -3129,6 +3153,15 @@ export type Database = {
       export_auth_identities: { Args: never; Returns: Json[] }
       export_auth_users: { Args: never; Returns: Json[] }
       finalize_billing_inventory: { Args: { _input: Json }; Returns: Json }
+      fulfill_order_lines: {
+        Args: {
+          _dest_tank_id?: string
+          _is_pickup?: boolean
+          _lines: Json
+          _order_id: string
+        }
+        Returns: Json
+      }
       get_billable_units_for_order: {
         Args: { _order_id: string }
         Returns: {

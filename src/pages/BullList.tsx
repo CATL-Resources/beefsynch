@@ -134,10 +134,28 @@ const BullList = () => {
     },
   });
 
+  // Filter chips: pull from the breeds lookup so the menu is stable across
+  // catalog edits, and append any legacy breed names still attached to bulls
+  // but missing from the lookup (so users can still find/clear them).
+  const { data: breedLookup = [] } = useQuery({
+    queryKey: ["breeds"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("breeds")
+        .select("name, sort_order")
+        .eq("is_active", true)
+        .order("sort_order");
+      return (data ?? []) as { name: string; sort_order: number }[];
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+
   const breeds = useMemo(() => {
-    const set = new Set(bulls.map((b) => b.breed).filter(Boolean));
-    return [...set].sort() as string[];
-  }, [bulls]);
+    const lookup = breedLookup.map((b) => b.name);
+    const onCatalog = new Set(bulls.map((b) => b.breed).filter(Boolean) as string[]);
+    const legacy = [...onCatalog].filter((n) => !lookup.includes(n)).sort();
+    return [...lookup, ...legacy];
+  }, [bulls, breedLookup]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();

@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import BreedSelect from "@/components/bulls/BreedSelect";
 import {
   Dialog,
   DialogContent,
@@ -135,10 +136,10 @@ export default function AddEditBullDialog({
             />
 
             <Label className="text-right">Breed</Label>
-            <Input
+            <BreedSelect
               value={formData.breed}
-              onChange={(e) => onFormChange({ breed: e.target.value })}
-              placeholder="Optional"
+              onChange={(v) => onFormChange({ breed: v })}
+              placeholder="Select breed (optional)"
             />
 
             <Label className="text-right self-start pt-2">Notes</Label>
