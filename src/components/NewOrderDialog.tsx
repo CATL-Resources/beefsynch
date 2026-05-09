@@ -216,9 +216,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
         notes: notes.trim() || null,
         placed_by: placedBy.trim() || null,
         order_type: orderType,
-        invoicing_company_id: semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
-          ? "630b12de-74bc-407a-8ee5-1ea17df18881"
-          : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
+        invoicing_company_id: orderType === "customer"
+          ? null
+          : semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
+            ? "630b12de-74bc-407a-8ee5-1ea17df18881"
+            : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
       };
 
       let orderId: string;
@@ -253,9 +255,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
           bull_catalog_id: b.catalogId,
           custom_bull_name: b.catalogId ? null : b.name.trim(),
           units: typeof b.units === "number" ? b.units : parseInt(String(b.units)) || 0,
-          invoicing_company_id: semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
-            ? "630b12de-74bc-407a-8ee5-1ea17df18881"
-            : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
+          invoicing_company_id: orderType === "customer"
+            ? null
+            : semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
+              ? "630b12de-74bc-407a-8ee5-1ea17df18881"
+              : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
         }));
         const { error: itemErr } = await supabase.from("semen_order_items").insert(rows);
         if (itemErr) throw itemErr;
@@ -346,65 +350,69 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
             </div>
           )}
 
-          {/* Semen Company */}
-          <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
-            <Label className="text-right text-sm">Company</Label>
-            <div>
-              <Select
-                value={semenCompanyId}
-                onValueChange={(val) => {
-                  if (val === "add_new") {
-                    setAddingCompany(true);
-                    setNewCompanyName("");
-                  } else {
-                    setSemenCompanyId(val);
-                    setAddingCompany(false);
-                  }
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                  <SelectItem value="add_new">+ Add New Company...</SelectItem>
-                </SelectContent>
-              </Select>
-              {addingCompany && (
-                <div className="flex items-center gap-2 mt-2">
-                  <Input
-                    value={newCompanyName}
-                    onChange={(e) => setNewCompanyName(e.target.value)}
-                    placeholder="Company name"
-                    className="flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    disabled={!newCompanyName.trim() || !orgId}
-                    onClick={async () => {
-                      if (!orgId) return;
-                      const { data, error } = await supabase
-                        .from("semen_companies")
-                        .insert({ name: newCompanyName.trim(), organization_id: orgId })
-                        .select("id, name")
-                        .single();
-                      if (error) {
-                        toast({ title: "Error", description: error.message, variant: "destructive" });
-                        return;
-                      }
-                      setCompanies((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
-                      setSemenCompanyId(data.id);
-                      setAddingCompany(false);
+          {/* Semen Company — inventory orders only. Customer orders defer
+              invoicing_company_id to the pack flow, which stamps it from the
+              source tank's owner_company_id. */}
+          {orderType === "inventory" && (
+            <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
+              <Label className="text-right text-sm">Company</Label>
+              <div>
+                <Select
+                  value={semenCompanyId}
+                  onValueChange={(val) => {
+                    if (val === "add_new") {
+                      setAddingCompany(true);
                       setNewCompanyName("");
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-              )}
+                    } else {
+                      setSemenCompanyId(val);
+                      setAddingCompany(false);
+                    }
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {companies.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                    <SelectItem value="add_new">+ Add New Company...</SelectItem>
+                  </SelectContent>
+                </Select>
+                {addingCompany && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Input
+                      value={newCompanyName}
+                      onChange={(e) => setNewCompanyName(e.target.value)}
+                      placeholder="Company name"
+                      className="flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!newCompanyName.trim() || !orgId}
+                      onClick={async () => {
+                        if (!orgId) return;
+                        const { data, error } = await supabase
+                          .from("semen_companies")
+                          .insert({ name: newCompanyName.trim(), organization_id: orgId })
+                          .select("id, name")
+                          .single();
+                        if (error) {
+                          toast({ title: "Error", description: error.message, variant: "destructive" });
+                          return;
+                        }
+                        setCompanies((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+                        setSemenCompanyId(data.id);
+                        setAddingCompany(false);
+                        setNewCompanyName("");
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Order Status */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
