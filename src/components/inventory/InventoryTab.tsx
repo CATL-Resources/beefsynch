@@ -200,21 +200,23 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
   // PostgREST's URL length cap can't take ~1k UUIDs and the request fails
   // silently. RLS + the org-scoped projects/orders embeds keep the result
   // size sane.
-  const { data: bullActivity = { projects: {}, orders: {} } } = useQuery({
+  const { data: bullActivity = { projects: {}, orders: {}, projectUnits: {}, orderUnits: {} } } = useQuery({
     queryKey: ["inventory_bull_activity", orgId],
     enabled: !!orgId,
     queryFn: async () => {
       const projects: Record<string, number> = {};
       const orders: Record<string, number> = {};
+      const projectUnits: Record<string, number> = {};
+      const orderUnits: Record<string, number> = {};
       const [projRes, ordRes] = await Promise.all([
         supabase
           .from("project_bulls")
-          .select("bull_catalog_id, projects!inner(status, organization_id)")
+          .select("bull_catalog_id, units, projects!inner(status, organization_id)")
           .eq("projects.organization_id", orgId!)
           .not("bull_catalog_id", "is", null),
         supabase
           .from("semen_order_items")
-          .select("bull_catalog_id, item_status, semen_orders!inner(fulfillment_status, organization_id)")
+          .select("bull_catalog_id, units, units_received, item_status, semen_orders!inner(fulfillment_status, organization_id)")
           .eq("semen_orders.organization_id", orgId!)
           .not("bull_catalog_id", "is", null),
       ]);
@@ -222,6 +224,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
         const status = r.projects?.status;
         if (status === "Work Complete" || status === "Invoiced") continue;
         projects[r.bull_catalog_id] = (projects[r.bull_catalog_id] ?? 0) + 1;
+        projectUnits[r.bull_catalog_id] = (projectUnits[r.bull_catalog_id] ?? 0) + (r.units ?? 0);
       }
       const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
       const TERMINAL_ORDER = new Set(["cancelled", "fulfilled"]);
@@ -229,8 +232,10 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
         if (TERMINAL_ITEM.has(r.item_status)) continue;
         if (TERMINAL_ORDER.has(r.semen_orders?.fulfillment_status)) continue;
         orders[r.bull_catalog_id] = (orders[r.bull_catalog_id] ?? 0) + 1;
+        const remaining = Math.max(0, (r.units ?? 0) - (r.units_received ?? 0));
+        orderUnits[r.bull_catalog_id] = (orderUnits[r.bull_catalog_id] ?? 0) + remaining;
       }
-      return { projects, orders };
+      return { projects, orders, projectUnits, orderUnits };
     },
   });
 
@@ -691,6 +696,10 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                       const subCanSuffix = row.subCanister && row.subCanister !== "—" ? ` / ${row.subCanister}` : "";
                       const projCount = row.bullCatalogId ? bullActivity.projects[row.bullCatalogId] ?? 0 : 0;
                       const ordCount = row.bullCatalogId ? bullActivity.orders[row.bullCatalogId] ?? 0 : 0;
+                      const pendingUnits = row.bullCatalogId
+                        ? (bullActivity.projectUnits[row.bullCatalogId] ?? 0) +
+                          (bullActivity.orderUnits[row.bullCatalogId] ?? 0)
+                        : 0;
                       const isExpanded = !!expandedRow && expandedRow.startsWith(`${row.id}:`);
                       const expandedSection = isExpanded ? expandedRow!.split(":")[1] : null;
                       const togglePill = (section: "projects" | "orders") => {
@@ -763,6 +772,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                           </TableCell>
                           <TableCell className={cn("text-right align-top tabular-nums font-medium", isZero && "text-muted-foreground font-normal")}>
                             {row.units}
+                            {pendingUnits > 0 && (
+                              <div className="text-[11px] font-normal text-orange-500" title="Units committed to active projects + open orders">
+                                {pendingUnits} pending
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="align-top">
                             <Badge variant="outline" className={STORAGE_BADGES[row.storageType] || "bg-muted text-muted-foreground border-border"}>
@@ -905,6 +919,10 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                     const ownerDisplay = row.owner || row.customer;
                     const isZero = row.units === 0;
                     const subCanSuffix = row.subCanister && row.subCanister !== "—" ? ` / ${row.subCanister}` : "";
+                    const mPendingUnits = row.bullCatalogId
+                      ? (bullActivity.projectUnits[row.bullCatalogId] ?? 0) +
+                        (bullActivity.orderUnits[row.bullCatalogId] ?? 0)
+                      : 0;
                     return (
                       <div key={row.id} className={cn("p-4 space-y-3", isZero && "opacity-60")}>
                         <div className="flex items-start justify-between gap-3">
@@ -928,6 +946,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                               <div className={cn("text-lg font-bold tabular-nums leading-none", isZero && "text-muted-foreground font-normal")}>
                                 {row.units}
                               </div>
+                              {mPendingUnits > 0 && (
+                                <div className="text-[10px] text-orange-500 mt-0.5">
+                                  {mPendingUnits} pending
+                                </div>
+                              )}
                               <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">units</div>
                             </div>
                             <DropdownMenu>
