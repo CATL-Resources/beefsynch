@@ -1028,17 +1028,20 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
   });
 
   const outTankIds = useMemo(() => outTanks.map((t: any) => t.id), [outTanks]);
-  // Pull the most recent pack record per tank — that's the event that actually
-  // sent it out, and it carries the customer + notes we want to surface here.
-  const { data: outPacks = [] } = useQuery({
-    queryKey: ["out_tank_packs", outTankIds],
+  // Pull the most recent packed_out movement per tank. tank_movements is the
+  // canonical movement log and carries the notes Tim writes when sending a
+  // tank out (e.g. "Packed (project) — Troy Johnson"); customer linkage
+  // also lives here when the movement was tied to a customer.
+  const { data: outMovements = [] } = useQuery({
+    queryKey: ["out_tank_movements", outTankIds],
     enabled: outTankIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("tank_packs")
-        .select("field_tank_id, packed_at, shipped_at, picked_up_at, notes, destination_name, customers!tank_packs_customer_id_fkey(name)")
-        .in("field_tank_id", outTankIds)
-        .order("packed_at", { ascending: false });
+        .from("tank_movements")
+        .select("tank_id, movement_date, notes, customer_id, customers!tank_movements_customer_id_fkey(name)")
+        .in("movement_type", ["packed_out", "picked_up", "shipped_out"])
+        .in("tank_id", outTankIds)
+        .order("movement_date", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
@@ -1057,23 +1060,33 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
 
   const lastOutMap = useMemo(() => {
     const map = new Map<string, any>();
-    for (const p of outPacks as any[]) {
-      if (!map.has(p.field_tank_id)) map.set(p.field_tank_id, p);
+    for (const m of outMovements as any[]) {
+      if (!map.has(m.tank_id)) map.set(m.tank_id, m);
     }
     return map;
-  }, [outPacks]);
+  }, [outMovements]);
 
-  const enriched = useMemo(() =>
-    outTanks.map((t: any) => {
-      const pack = lastOutMap.get(t.id);
-      const dateOut = pack?.shipped_at || pack?.picked_up_at || pack?.packed_at || null;
+  const [search, setSearch] = useState("");
+
+  const enriched = useMemo(() => {
+    const all = outTanks.map((t: any) => {
+      const move = lastOutMap.get(t.id);
+      const dateOut = move?.movement_date || null;
       const daysOut = dateOut ? differenceInDays(new Date(), parseISO(dateOut)) : null;
-      const customerName =
-        pack?.customers?.name || pack?.destination_name || t.customers?.name || null;
-      return { ...t, dateOut, daysOut, moveNotes: pack?.notes || null, customerName };
-    }).sort((a: any, b: any) => (b.daysOut ?? 99999) - (a.daysOut ?? 99999)),
-    [outTanks, lastOutMap]
-  );
+      const customerName = move?.customers?.name || t.customers?.name || null;
+      return { ...t, dateOut, daysOut, moveNotes: move?.notes || null, customerName };
+    });
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? all.filter((t: any) => {
+          const num = String(t.tank_number ?? "").toLowerCase();
+          const name = (t.tank_name ?? "").toLowerCase();
+          const cust = (t.customerName ?? "").toLowerCase();
+          return num.includes(q) || name.includes(q) || cust.includes(q);
+        })
+      : all;
+    return filtered.sort((a: any, b: any) => (b.daysOut ?? 99999) - (a.daysOut ?? 99999));
+  }, [outTanks, lastOutMap, search]);
 
   const currentlyOut = outTanks.length;
   const avgDaysOut = useMemo(() => { const vals = enriched.filter((t: any) => t.daysOut !== null).map((t: any) => t.daysOut as number); return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0; }, [enriched]);
@@ -1101,6 +1114,16 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
         <StatCard title="Currently Out" value={currentlyOut} delay={0} index={0} icon={Truck} />
         <StatCard title="Avg Days Out" value={avgDaysOut} delay={100} index={1} icon={Clock} />
         <StatCard title="Returned This Month" value={returnedCount} delay={200} index={2} icon={RotateCcw} />
+      </div>
+
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search by tank, customer…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
       <div className="rounded-lg border border-border/50 overflow-hidden">
