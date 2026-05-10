@@ -782,7 +782,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                                 {inv && proj && <span className="text-muted-foreground/60">·</span>}
                                 {proj && (
                                   <span style={{ color: "#639922" }}>
-                                    {proj.count} project{proj.count === 1 ? "" : "s"} ({proj.headCount} head)
+                                    {proj.count} project{proj.count === 1 ? "" : "s"} ({proj.units} units needed)
                                   </span>
                                 )}
                               </div>
@@ -959,8 +959,8 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                                               {p.protocol ? ` · ${p.protocol}` : ""}
                                             </div>
                                             <div className="tabular-nums">
-                                              <span className="font-medium">{p.head_count ?? 0}</span>
-                                              <span style={{ color: "#3B6D11" }}> hd</span>
+                                              <span className="font-medium">{pb.units ?? 0}</span>
+                                              <span style={{ color: "#3B6D11" }}> units</span>
                                             </div>
                                             <Badge
                                               variant="outline"
