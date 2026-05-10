@@ -635,15 +635,17 @@ const SemenOrderDetail = () => {
             <Badge variant="outline" className={cn("capitalize text-xs", fulfillmentColors[order.fulfillment_status] || "")}>
               {order.fulfillment_status.replace(/_/g, " ")}
             </Badge>
-            <Badge variant="outline" className={cn("capitalize text-xs", billingColors[order.billing_status] || "")}>
-              {order.billing_status}
-            </Badge>
-            {order.invoice_number && (
+            {!isInventory && (
+              <Badge variant="outline" className={cn("capitalize text-xs", billingColors[order.billing_status] || "")}>
+                {order.billing_status}
+              </Badge>
+            )}
+            {!isInventory && order.invoice_number && (
               <Badge variant="outline" className="text-xs">
                 #{order.invoice_number}
               </Badge>
             )}
-            {order.invoiced_at ? (
+            {!isInventory && (order.invoiced_at ? (
               <span className="inline-flex items-center gap-2 text-xs text-emerald-600">
                 <span>Invoiced {format(parseISO(order.invoiced_at), "MMM d, yyyy")}</span>
                 <button
@@ -658,7 +660,7 @@ const SemenOrderDetail = () => {
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={markOrderInvoiced}>
                 Mark Invoiced
               </Button>
-            )}
+            ))}
           </div>
 
           {order.order_type === "customer" && (() => {

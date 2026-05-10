@@ -1180,9 +1180,11 @@ const CustomerDetail = () => {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={BILLING_COLORS[order.billing_status] || "bg-muted text-muted-foreground"}>
-                            {order.billing_status}
-                          </Badge>
+                          {order.order_type !== "inventory" && (
+                            <Badge variant="outline" className={BILLING_COLORS[order.billing_status] || "bg-muted text-muted-foreground"}>
+                              {order.billing_status}
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           <span className="text-xs text-primary hover:underline">View →</span>

@@ -27,10 +27,15 @@ type Tier = "open" | "needs_invoice" | "done";
 const classify = (o: any): Tier | "cancelled" | null => {
   const f = o.fulfillment_status;
   const b = o.billing_status;
+  const isInventory = o.order_type === "inventory";
   const isInvoiced = b === "invoiced" || b === "paid";
   const isFulfilled = f === "fulfilled" || f === "ready_to_close";
 
   if (f === "cancelled") return "cancelled";
+
+  // Inventory orders (POs to suppliers) have no customer to bill. Fulfilled =
+  // done, full stop — they never enter the needs_invoice tier.
+  if (isInventory) return isFulfilled ? "done" : "open";
 
   // Done = fulfilled AND invoiced
   if (isFulfilled && isInvoiced) return "done";
@@ -228,7 +233,9 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   const totalUnits = useMemo(() => scopedOrders.reduce((sum: number, o: any) =>
     sum + (o.semen_order_items?.reduce((s: number, i: any) => s + (i.units || 0), 0) ?? 0), 0), [scopedOrders]);
   const pendingCount = scopedOrders.filter((o: any) => o.fulfillment_status !== "fulfilled").length;
-  const unbilledCount = scopedOrders.filter((o: any) => o.billing_status === "unbilled").length;
+  // Inventory orders are CATL's POs to suppliers — no customer to bill, so
+  // they shouldn't count toward the unbilled tally.
+  const unbilledCount = scopedOrders.filter((o: any) => o.billing_status === "unbilled" && o.order_type !== "inventory").length;
 
   const getBullSummary = (items: any[]) => {
     if (!items || items.length === 0) return "—";
@@ -287,9 +294,11 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
               <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderFulfillment', order.fulfillment_status))}>
                 {order.fulfillment_status?.replace(/_/g, " ")}
               </Badge>
-              <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderBilling', order.billing_status))}>
-                {order.billing_status}
-              </Badge>
+              {order.order_type !== "inventory" && (
+                <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderBilling', order.billing_status))}>
+                  {order.billing_status}
+                </Badge>
+              )}
               {order.order_type === "inventory" && receivedSet.has(order.id) && (
                 <Badge variant="outline" className="bg-green-600/20 text-green-400 border-green-600/30 text-[10px] gap-0.5">
                   <Check className="h-2.5 w-2.5" /> Received

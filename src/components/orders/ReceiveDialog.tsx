@@ -63,10 +63,13 @@ interface TankOption {
   id: string;
   tank_number: string | number;
   tank_name: string | null;
+  tank_type?: string | null;
 }
 
-const tankLabel = (t: TankOption) =>
-  t.tank_name ? `#${t.tank_number} — ${t.tank_name}` : `Tank #${t.tank_number}`;
+const tankLabel = (t: TankOption) => {
+  const base = t.tank_name ? `#${t.tank_number} — ${t.tank_name}` : `Tank #${t.tank_number}`;
+  return t.tank_type === "customer_tank" ? `${base} (customer)` : base;
+};
 
 function TankCombobox({
   value,
@@ -167,10 +170,15 @@ export default function ReceiveDialog({
     queryKey: ["tanks-list-receive", orgId],
     enabled: !!orgId && open,
     queryFn: async () => {
+      // Only physically present, charged tanks. Customer tanks come last
+      // (sorted via tank_type) so company tanks surface first.
       const { data, error } = await supabase
         .from("tanks")
-        .select("id, tank_number, tank_name")
+        .select("id, tank_number, tank_name, tank_type")
         .eq("organization_id", orgId!)
+        .eq("location_status", "here")
+        .eq("nitrogen_status", "wet")
+        .order("tank_type")
         .order("tank_number");
       if (error) throw error;
       return (data ?? []) as TankOption[];
