@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   Search, Archive, Users, Building2, Dna, FileText, FileSpreadsheet, ArrowUpDown,
-  Truck, ChevronDown, ChevronUp, MoreHorizontal, Pencil,
+  Truck, ChevronDown, ChevronUp, MoreHorizontal, Pencil, ClipboardList, Package,
 } from "lucide-react";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 
@@ -194,6 +194,80 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     notes: item.notes || null,
     inventoriedAt: item.inventoried_at,
   })), [inventory]);
+
+  // Distinct catalog bulls in view — used to fetch project/order pill counts
+  // in one shot rather than one query per row.
+  const distinctBullCatalogIds = useMemo(
+    () => Array.from(new Set(rows.map((r: any) => r.bullCatalogId).filter(Boolean))) as string[],
+    [rows],
+  );
+
+  const { data: bullActivity = { projects: {}, orders: {} } } = useQuery({
+    queryKey: ["inventory_bull_activity", distinctBullCatalogIds],
+    enabled: distinctBullCatalogIds.length > 0,
+    queryFn: async () => {
+      const projects: Record<string, number> = {};
+      const orders: Record<string, number> = {};
+      const [projRes, ordRes] = await Promise.all([
+        supabase
+          .from("project_bulls")
+          .select("bull_catalog_id, projects!inner(status)")
+          .in("bull_catalog_id", distinctBullCatalogIds),
+        supabase
+          .from("semen_order_items")
+          .select("bull_catalog_id, item_status, semen_orders!inner(fulfillment_status)")
+          .in("bull_catalog_id", distinctBullCatalogIds),
+      ]);
+      for (const r of (projRes.data ?? []) as any[]) {
+        const status = r.projects?.status;
+        if (status === "Work Complete" || status === "Invoiced") continue;
+        if (!r.bull_catalog_id) continue;
+        projects[r.bull_catalog_id] = (projects[r.bull_catalog_id] ?? 0) + 1;
+      }
+      for (const r of (ordRes.data ?? []) as any[]) {
+        if (r.item_status === "cancelled") continue;
+        const fs = r.semen_orders?.fulfillment_status;
+        if (fs === "cancelled") continue;
+        if (!r.bull_catalog_id) continue;
+        orders[r.bull_catalog_id] = (orders[r.bull_catalog_id] ?? 0) + 1;
+      }
+      return { projects, orders };
+    },
+  });
+
+  // expandedRow: `${rowId}:projects` | `${rowId}:orders` | null
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const expandedBullCatalogId = useMemo(() => {
+    if (!expandedRow) return null;
+    const [rowId] = expandedRow.split(":");
+    return rows.find((r: any) => r.id === rowId)?.bullCatalogId ?? null;
+  }, [expandedRow, rows]);
+
+  const { data: bullDetail } = useQuery({
+    queryKey: ["inventory_bull_detail", expandedBullCatalogId],
+    enabled: !!expandedBullCatalogId,
+    queryFn: async () => {
+      const id = expandedBullCatalogId!;
+      const [projRes, ordRes] = await Promise.all([
+        supabase
+          .from("project_bulls")
+          .select("units, projects!inner(id, name, protocol, head_count, breeding_date, status, customers!projects_customer_id_fkey(name))")
+          .eq("bull_catalog_id", id),
+        supabase
+          .from("semen_order_items")
+          .select("units, units_received, item_status, semen_orders!inner(id, order_date, fulfillment_status, customers!semen_orders_customer_id_fkey(name))")
+          .eq("bull_catalog_id", id),
+      ]);
+      const projects = (projRes.data ?? []).filter((r: any) => {
+        const s = r.projects?.status;
+        return s !== "Work Complete" && s !== "Invoiced";
+      });
+      const orders = (ordRes.data ?? []).filter((r: any) =>
+        r.item_status !== "cancelled" && r.semen_orders?.fulfillment_status !== "cancelled",
+      );
+      return { projects, orders };
+    },
+  });
 
   const filtered = useMemo(() => {
     let result = rows;
@@ -614,8 +688,17 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                       const ownerDisplay = row.owner || row.customer;
                       const isZero = row.units === 0;
                       const subCanSuffix = row.subCanister && row.subCanister !== "—" ? ` / ${row.subCanister}` : "";
+                      const projCount = row.bullCatalogId ? bullActivity.projects[row.bullCatalogId] ?? 0 : 0;
+                      const ordCount = row.bullCatalogId ? bullActivity.orders[row.bullCatalogId] ?? 0 : 0;
+                      const isExpanded = !!expandedRow && expandedRow.startsWith(`${row.id}:`);
+                      const expandedSection = isExpanded ? expandedRow!.split(":")[1] : null;
+                      const togglePill = (section: "projects" | "orders") => {
+                        const key = `${row.id}:${section}`;
+                        setExpandedRow((cur) => (cur === key ? null : key));
+                      };
                       return (
-                        <TableRow key={row.id} className={cn("hover:bg-muted/20", isZero && "opacity-60")}>
+                        <Fragment key={row.id}>
+                        <TableRow className={cn("hover:bg-muted/20", isZero && "opacity-60")}>
                           <TableCell className="align-top">
                             <div className="font-medium truncate flex items-center gap-1" title={row.bullName}>
                               <span className="truncate">{row.bullName}</span>
@@ -630,6 +713,38 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                               )}
                             </div>
                             <div className="text-xs font-mono text-muted-foreground truncate" title={row.bullCode}>{row.bullCode}</div>
+                            {(projCount > 0 || ordCount > 0) && (
+                              <div className="mt-1.5 flex gap-1.5 flex-wrap">
+                                {projCount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); togglePill("projects"); }}
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors",
+                                      "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 hover:bg-blue-500/25",
+                                      isExpanded && expandedSection === "projects" && "ring-1 ring-blue-500",
+                                    )}
+                                  >
+                                    <ClipboardList className="h-3 w-3" />
+                                    {projCount} project{projCount === 1 ? "" : "s"}
+                                  </button>
+                                )}
+                                {ordCount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); togglePill("orders"); }}
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors",
+                                      "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/25",
+                                      isExpanded && expandedSection === "orders" && "ring-1 ring-amber-500",
+                                    )}
+                                  >
+                                    <Package className="h-3 w-3" />
+                                    {ordCount} order{ordCount === 1 ? "" : "s"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="align-top text-sm text-muted-foreground">
                             {row.breed || "—"}
@@ -685,6 +800,80 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                             </DropdownMenu>
                           </TableCell>
                         </TableRow>
+                        {isExpanded && (
+                          <TableRow className="bg-muted/10 hover:bg-muted/10">
+                            <TableCell colSpan={7} className="py-3">
+                              {!bullDetail ? (
+                                <div className="text-xs text-muted-foreground">Loading…</div>
+                              ) : expandedSection === "projects" ? (
+                                bullDetail.projects.length === 0 ? (
+                                  <div className="text-xs text-muted-foreground">No active projects.</div>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Active projects</div>
+                                    {bullDetail.projects.map((pb: any, idx: number) => {
+                                      const p = pb.projects;
+                                      return (
+                                        <div key={idx} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 text-xs items-baseline">
+                                          <div className="truncate">
+                                            <span className="font-medium">{p.customers?.name ?? "—"}</span>
+                                            <span className="text-muted-foreground"> · {p.name}</span>
+                                          </div>
+                                          <div className="text-muted-foreground">{p.protocol || "—"}</div>
+                                          <div className="text-muted-foreground tabular-nums">{p.head_count ?? 0} hd</div>
+                                          <div className="font-medium tabular-nums">{pb.units ?? 0} units</div>
+                                          <div className="text-muted-foreground">
+                                            {p.breeding_date ? format(new Date(p.breeding_date), "MMM d, yyyy") : "—"}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )
+                              ) : (
+                                bullDetail.orders.length === 0 ? (
+                                  <div className="text-xs text-muted-foreground">No active orders.</div>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Active orders</div>
+                                    {bullDetail.orders.map((oi: any, idx: number) => {
+                                      const o = oi.semen_orders;
+                                      const status = oi.item_status ?? "pending";
+                                      return (
+                                        <div key={idx} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 text-xs items-baseline">
+                                          <div className="truncate font-medium">{o?.customers?.name ?? "—"}</div>
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              "capitalize text-[10px]",
+                                              status === "received" && "bg-emerald-500/15 text-emerald-700 border-emerald-500/30",
+                                              status === "partially_received" && "bg-amber-500/15 text-amber-700 border-amber-500/30",
+                                              status === "fulfilled" && "bg-emerald-500/15 text-emerald-700 border-emerald-500/30",
+                                              status === "pending" && "bg-muted text-muted-foreground",
+                                            )}
+                                          >
+                                            {status.replace(/_/g, " ")}
+                                          </Badge>
+                                          <div className="tabular-nums">
+                                            <span className="font-medium">{oi.units ?? 0}</span>
+                                            <span className="text-muted-foreground"> ord</span>
+                                            {oi.units_received > 0 && (
+                                              <span className="text-muted-foreground"> · {oi.units_received} recv</span>
+                                            )}
+                                          </div>
+                                          <div className="text-muted-foreground">
+                                            {o?.order_date ? format(new Date(o.order_date), "MMM d, yyyy") : "—"}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       );
                     })
                   )}
