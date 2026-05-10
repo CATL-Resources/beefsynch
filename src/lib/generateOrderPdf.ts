@@ -27,10 +27,12 @@ interface OrderItemData {
   units: number;
   custom_bull_name: string | null;
   bills_through: string | null;
+  fulfilled?: number;
   bulls_catalog: {
     bull_name: string;
     company: string;
     registration_number: string;
+    naab_code?: string | null;
   } | null;
 }
 
@@ -103,23 +105,29 @@ export function generateOrderPdf(
 
     const tableBody = items.map((item) => [
       getBullDisplayName(item),
+      item.bulls_catalog?.naab_code || "—",
       item.bulls_catalog?.company || "—",
-      item.bulls_catalog?.registration_number || "—",
       item.bills_through || "—",
       String(item.units),
+      String(item.fulfilled ?? 0),
     ]);
 
     const totalUnits = items.reduce((s, i) => s + i.units, 0);
-    tableBody.push(["", "", "", "Total", String(totalUnits)]);
+    const totalFulfilled = items.reduce((s, i) => s + (i.fulfilled ?? 0), 0);
+    tableBody.push(["", "", "", "Total", String(totalUnits), String(totalFulfilled)]);
 
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [["Bull Name", "Company", "Reg #", "Bills Through", "Units"]],
+      head: [["Bull", "NAAB", "Company", "Bills Through", "Ordered", "Fulfilled"]],
       body: tableBody,
       styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 3 },
       headStyles: getStandardHeadStyles(),
       alternateRowStyles: { fillColor: [245, 245, 245] },
+      columnStyles: {
+        4: { halign: "right" },
+        5: { halign: "right" },
+      },
       didParseCell: (data) => {
         if (data.row.index === tableBody.length - 1 && data.section === "body") {
           data.cell.styles.fontStyle = "bold";

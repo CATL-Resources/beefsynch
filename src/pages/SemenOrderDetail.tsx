@@ -108,6 +108,7 @@ const SemenOrderDetail = () => {
   const [packData, setPackData] = useState<any[]>([]);
   const [directSaleTxns, setDirectSaleTxns] = useState<any[]>([]);
   const [supplyItems, setSupplyItems] = useState<any[]>([]);
+  const [billableByBull, setBillableByBull] = useState<Map<string, number>>(new Map());
   const [availability, setAvailability] = useState<
     Record<string, { total: number; locations: Array<{ tank: string; canister: string; units: number; owner: string }> }>
   >({});
@@ -189,6 +190,25 @@ const SemenOrderDetail = () => {
         .eq("semen_order_id", id)
         .order("created_at");
       setSupplyItems(supplyData ?? []);
+
+      // Authoritative fulfilled/billable counts per bull (covers pack lines,
+      // direct sales, customer pickups, withdrawals, reinventory adjustments).
+      const { data: billableRows, error: billableErr } = await supabase.rpc(
+        "get_billable_units_for_order",
+        { _order_id: id },
+      );
+      if (billableErr) {
+        console.error("get_billable_units_for_order error:", billableErr);
+        setBillableByBull(new Map());
+      } else {
+        const m = new Map<string, number>();
+        for (const r of (billableRows ?? []) as Array<{ bull_catalog_id: string | null; bull_name: string | null; units: number }>) {
+          const k = r.bull_catalog_id ?? r.bull_name ?? "";
+          if (!k) continue;
+          m.set(k, (m.get(k) ?? 0) + (r.units ?? 0));
+        }
+        setBillableByBull(m);
+      }
     } catch (err: any) {
       console.error("Order detail load failed:", err);
       toast({ title: "Error loading order", description: err?.message || "Please try again", variant: "destructive" });
@@ -387,6 +407,7 @@ const SemenOrderDetail = () => {
       items.map((item: any) => ({
         ...item,
         bills_through: item.semen_companies?.name || null,
+        fulfilled: billableByBull.get(item.bull_catalog_id || item.custom_bull_name || "") ?? 0,
       })),
       reconData,
       supplyItems,
@@ -957,9 +978,12 @@ const SemenOrderDetail = () => {
                     }
                   }
 
-                  const totalUsed = totalPacked - totalReturned;
-                  const delivered = totalPacked > 0 ? totalUsed : 0;
-                  const outstanding = Math.max(0, ordered - delivered);
+                  // Fulfilled is sourced from get_billable_units_for_order — covers
+                  // pack lines, direct sales, customer pickups, withdrawals, and
+                  // reinventory adjustments. The pack-line totals above are kept
+                  // only for the expandable pack-record breakdown below.
+                  const fulfilledUnits = billableByBull.get(bullKey) ?? 0;
+                  const outstanding = Math.max(0, ordered - fulfilledUnits);
                   const isFullyFilled = outstanding === 0 && ordered > 0;
 
                   return (
@@ -1037,23 +1061,10 @@ const SemenOrderDetail = () => {
                         {/* Fulfilled */}
                         <div className="col-span-2 text-right">
                           <span className="sm:hidden text-xs text-muted-foreground mr-1">Fulfilled:</span>
-                          {(() => {
-                            const directUnits = directSaleTxns
-                              .filter((t) => (t.bull_catalog_id || t.custom_bull_name || "") === bullKey)
-                              .reduce((s, t) => s + Math.abs(t.units_change || 0), 0);
-                            const fulfilledTotal = Math.max(0, totalPacked - totalReturned) + directUnits;
-                            return (
-                              <>
-                                <span className="font-medium">{fulfilledTotal > 0 ? fulfilledTotal : "—"}</span>
-                                {totalReturned > 0 && (
-                                  <div className="text-xs text-muted-foreground">({totalPacked} packed · {totalReturned} returned)</div>
-                                )}
-                                {directUnits > 0 && totalPacked === 0 && (
-                                  <div className="text-xs text-muted-foreground">direct sale</div>
-                                )}
-                              </>
-                            );
-                          })()}
+                          <span className="font-medium">{fulfilledUnits > 0 ? fulfilledUnits : "—"}</span>
+                          {totalReturned > 0 && (
+                            <div className="text-xs text-muted-foreground">({totalPacked} packed · {totalReturned} returned)</div>
+                          )}
                         </div>
 
                         {/* Billed */}
@@ -1072,9 +1083,9 @@ const SemenOrderDetail = () => {
                         <div className="col-span-2 text-right">
                           {isFullyFilled ? (
                             <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">✓ Filled</span>
-                          ) : outstanding > 0 && totalPacked > 0 ? (
+                          ) : outstanding > 0 && fulfilledUnits > 0 ? (
                             <span className="text-xs font-medium text-amber-600 dark:text-amber-400">{outstanding} outstanding</span>
-                          ) : availTotal === 0 && totalPacked === 0 ? (
+                          ) : availTotal === 0 && fulfilledUnits === 0 ? (
                             <span className="text-xs font-medium text-destructive">Not in stock</span>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
@@ -1146,20 +1157,14 @@ const SemenOrderDetail = () => {
                   <div className="col-span-1"></div>
                   <div className="col-span-2 text-right">
                     {(() => {
-                      let totalDelivered = 0;
-                      for (const link of (packData || [])) {
-                        const pack = link.tank_packs;
-                        if (!pack) continue;
-                        const returnMap = unpackReturnsByBull(pack.tank_unpack_lines || []);
-                        for (const line of (pack.tank_pack_lines || [])) {
-                          const k = line.bull_catalog_id || line.bull_name || "";
-                          const ret = returnMap.get(k) || 0;
-                          totalDelivered += Math.max(0, (line.units || 0) - ret);
-                        }
+                      let totalFulfilled = 0;
+                      for (const it of items) {
+                        const k = it.bull_catalog_id || it.custom_bull_name || "";
+                        totalFulfilled += billableByBull.get(k) ?? 0;
                       }
-                      const outstanding = Math.max(0, totalUnits - totalDelivered);
+                      const outstanding = Math.max(0, totalUnits - totalFulfilled);
                       if (outstanding === 0 && totalUnits > 0) return <span className="text-emerald-600 dark:text-emerald-400">✓ All filled</span>;
-                      if (outstanding > 0 && totalDelivered > 0) return <span className="text-amber-600 dark:text-amber-400">{outstanding} outstanding</span>;
+                      if (outstanding > 0 && totalFulfilled > 0) return <span className="text-amber-600 dark:text-amber-400">{outstanding} outstanding</span>;
                       return "—";
                     })()}
                   </div>
@@ -1226,26 +1231,7 @@ const SemenOrderDetail = () => {
         order={order}
         items={items}
         customerName={customerName}
-        fulfilledByBull={(() => {
-          const m = new Map<string, number>();
-          for (const link of packData || []) {
-            const pack = link.tank_packs;
-            if (!pack) continue;
-            const returnsByBull = unpackReturnsByBull(pack.tank_unpack_lines || []);
-            for (const pl of (pack.tank_pack_lines || [])) {
-              const k = pl.bull_catalog_id || pl.bull_name || "";
-              if (!k) continue;
-              const used = Math.max(0, (pl.units || 0) - (returnsByBull.get(k) || 0));
-              m.set(k, (m.get(k) || 0) + used);
-            }
-          }
-          for (const txn of directSaleTxns) {
-            const k = txn.bull_catalog_id || txn.custom_bull_name || "";
-            const used = Math.abs(txn.units_change || 0);
-            m.set(k, (m.get(k) || 0) + used);
-          }
-          return m;
-        })()}
+        fulfilledByBull={billableByBull}
       />
 
       <NewOrderDialog

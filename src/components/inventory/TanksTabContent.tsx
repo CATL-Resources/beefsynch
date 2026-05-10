@@ -1008,6 +1008,7 @@ const FillsTab = ({ orgId, userId }: { orgId: string; userId: string | null }) =
    TAB 4 — TANKS OUT
    ═══════════════════════════════════════════════════ */
 const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }) => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [returnOpen, setReturnOpen] = useState(false);
   const [returnTankId, setReturnTankId] = useState<string | null>(null);
@@ -1027,11 +1028,17 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
   });
 
   const outTankIds = useMemo(() => outTanks.map((t: any) => t.id), [outTanks]);
-  const { data: movements = [] } = useQuery({
-    queryKey: ["out_tank_movements", outTankIds],
+  // Pull the most recent pack record per tank — that's the event that actually
+  // sent it out, and it carries the customer + notes we want to surface here.
+  const { data: outPacks = [] } = useQuery({
+    queryKey: ["out_tank_packs", outTankIds],
     enabled: outTankIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase.from("tank_movements").select("tank_id, movement_date, movement_type, notes, customers(name)").in("tank_id", outTankIds).in("movement_type", ["picked_up", "shipped_out"]).order("movement_date", { ascending: false });
+      const { data, error } = await supabase
+        .from("tank_packs")
+        .select("field_tank_id, packed_at, shipped_at, picked_up_at, notes, destination_name, customers!tank_packs_customer_id_fkey(name)")
+        .in("field_tank_id", outTankIds)
+        .order("packed_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
@@ -1048,15 +1055,22 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
     },
   });
 
-  const lastOutMap = useMemo(() => { const map = new Map<string, any>(); for (const m of movements) { if (!map.has(m.tank_id)) map.set(m.tank_id, m); } return map; }, [movements]);
+  const lastOutMap = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const p of outPacks as any[]) {
+      if (!map.has(p.field_tank_id)) map.set(p.field_tank_id, p);
+    }
+    return map;
+  }, [outPacks]);
 
   const enriched = useMemo(() =>
     outTanks.map((t: any) => {
-      const move = lastOutMap.get(t.id);
-      const dateOut = move?.movement_date || null;
+      const pack = lastOutMap.get(t.id);
+      const dateOut = pack?.shipped_at || pack?.picked_up_at || pack?.packed_at || null;
       const daysOut = dateOut ? differenceInDays(new Date(), parseISO(dateOut)) : null;
-      const customerName = move?.customers?.name || t.customers?.name || null;
-      return { ...t, dateOut, daysOut, moveNotes: move?.notes || null, customerName };
+      const customerName =
+        pack?.customers?.name || pack?.destination_name || t.customers?.name || null;
+      return { ...t, dateOut, daysOut, moveNotes: pack?.notes || null, customerName };
     }).sort((a: any, b: any) => (b.daysOut ?? 99999) - (a.daysOut ?? 99999)),
     [outTanks, lastOutMap]
   );
@@ -1102,7 +1116,11 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
             ) : enriched.length === 0 ? (
               <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No tanks currently out.</TableCell></TableRow>
             ) : enriched.map((tank: any) => (
-              <TableRow key={tank.id} className={cn("hover:bg-muted/20", tank.daysOut !== null && tank.daysOut > 60 && "bg-destructive/5", tank.daysOut !== null && tank.daysOut > 30 && tank.daysOut <= 60 && "bg-amber-500/5")}>
+              <TableRow
+                key={tank.id}
+                onClick={() => navigate(`/tanks/${tank.id}`)}
+                className={cn("cursor-pointer hover:bg-muted/20", tank.daysOut !== null && tank.daysOut > 60 && "bg-destructive/5", tank.daysOut !== null && tank.daysOut > 30 && tank.daysOut <= 60 && "bg-amber-500/5")}
+              >
                 <TableCell className="font-medium whitespace-nowrap">{tank.tank_number}</TableCell>
                 <TableCell className="whitespace-nowrap">{tank.tank_name || "—"}</TableCell>
                 <TableCell className="whitespace-nowrap">{tank.customerName || "—"}</TableCell>
@@ -1110,7 +1128,16 @@ const TanksOutTab = ({ orgId, userId }: { orgId: string; userId: string | null }
                 <TableCell className="whitespace-nowrap">{tank.dateOut ? format(parseISO(tank.dateOut), "MMM d, yyyy") : "—"}</TableCell>
                 <TableCell className={cn("text-right font-medium", tank.daysOut !== null && tank.daysOut > 60 && "text-destructive", tank.daysOut !== null && tank.daysOut > 30 && tank.daysOut <= 60 && "text-orange-400")}>{tank.daysOut ?? "—"}</TableCell>
                 <TableCell className="text-xs max-w-[200px] truncate">{tank.moveNotes || "—"}</TableCell>
-                <TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => openReturn(tank.id)} className="gap-1.5"><RotateCcw className="h-3.5 w-3.5" /> Return</Button></TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => { e.stopPropagation(); openReturn(tank.id); }}
+                    className="gap-1.5"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Return
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
