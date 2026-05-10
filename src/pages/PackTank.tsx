@@ -128,7 +128,11 @@ const PackTank = () => {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [didPreselect, setDidPreselect] = useState(false);
 
-  // Fetch all active tanks (for project packs)
+  // Fetch all packable tanks. We intentionally do NOT filter out tanks with
+  // location_status = 'out' — multiple projects can be packed into the same
+  // field tank before it leaves, and once it does leave the first pack flips
+  // location_status to 'out'. The pack_tank RPC is fine being called again
+  // for an already-out tank.
   const { data: allActiveTanks = [] } = useQuery({
     queryKey: ["all_active_tanks", orgId],
     enabled: !!orgId,
@@ -137,11 +141,31 @@ const PackTank = () => {
         .from("tanks")
         .select("id, tank_name, tank_number, tank_type, nitrogen_status, location_status, customer_id")
         .eq("organization_id", orgId!)
-        .eq("location_status", "here")
         .eq("nitrogen_status", "wet")
         .order("tank_number");
       if (error) throw error;
       return data ?? [];
+    },
+  });
+
+  // Active pack count per field tank — shown as an indicator in the picker so
+  // users know a tank already carries packs but can still select it.
+  const { data: activePacksByTank = {} } = useQuery({
+    queryKey: ["active_packs_by_tank", orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tank_packs")
+        .select("field_tank_id, status")
+        .eq("organization_id", orgId!)
+        .not("status", "in", "(cancelled,unpacked)");
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      for (const row of (data ?? []) as { field_tank_id: string | null }[]) {
+        if (!row.field_tank_id) continue;
+        counts[row.field_tank_id] = (counts[row.field_tank_id] ?? 0) + 1;
+      }
+      return counts;
     },
   });
 
@@ -879,6 +903,11 @@ const PackTank = () => {
                                 {packType === "project" && (
                                   <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">{TYPE_LABELS[t.tank_type] || t.tank_type}</Badge>
                                 )}
+                                {(activePacksByTank[t.id] ?? 0) > 0 && (
+                                  <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                    {activePacksByTank[t.id]} active pack{activePacksByTank[t.id] === 1 ? "" : "s"}
+                                  </Badge>
+                                )}
                               </CommandItem>
                             );
                           })}
@@ -896,6 +925,11 @@ const PackTank = () => {
                                   <Check className={cn("mr-2 h-4 w-4", selectedTankId === t.id ? "opacity-100" : "opacity-0")} />
                                   {label}
                                   <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">Customer</Badge>
+                                  {(activePacksByTank[t.id] ?? 0) > 0 && (
+                                    <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                      {activePacksByTank[t.id]} active pack{activePacksByTank[t.id] === 1 ? "" : "s"}
+                                    </Badge>
+                                  )}
                                 </CommandItem>
                               );
                             })}

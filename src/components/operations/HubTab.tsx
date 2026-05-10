@@ -29,6 +29,7 @@ interface UpcomingProject {
   pack_id: string | null;
   pack_status: string | null;
   packed_units: number | null;
+  pack_tanks: { tank_name: string | null; tank_number: string | number }[];
   bull_names: string[];
   products_delivered: number;
   products_total: number;
@@ -98,16 +99,27 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         const projIds = (projData || []).map((p) => p.id);
         const { data: packLinks } = await supabase
           .from("tank_pack_projects")
-          .select("project_id, tank_pack_id, tank_packs(id, status, tank_pack_lines(units))")
+          .select("project_id, tank_pack_id, tank_packs(id, status, tank_pack_lines(units), tanks!tank_packs_field_tank_id_fkey(tank_name, tank_number))")
           .in("project_id", projIds.length > 0 ? projIds : ["00000000-0000-0000-0000-000000000000"]);
 
         const packMap = new Map<string, { pack_id: string; pack_status: string; packed_units: number }>();
+        const packTanksMap = new Map<string, { tank_name: string | null; tank_number: string | number }[]>();
         if (packLinks) {
-          for (const link of packLinks) {
+          for (const link of packLinks as any[]) {
             const tp = link.tank_packs;
-            if (tp) {
-              const units = (tp.tank_pack_lines || []).reduce((s: number, l: any) => s + (l.units || 0), 0);
-              packMap.set(link.project_id, { pack_id: tp.id, pack_status: tp.status, packed_units: units });
+            if (!tp) continue;
+            // Skip cancelled / unpacked packs — they don't represent semen
+            // currently in a tank for this project.
+            if (tp.status === "cancelled" || tp.status === "unpacked") continue;
+            const units = (tp.tank_pack_lines || []).reduce((s: number, l: any) => s + (l.units || 0), 0);
+            // packMap keeps the most recent pack for the existing
+            // single-pack badge below; packTanksMap collects all of them.
+            packMap.set(link.project_id, { pack_id: tp.id, pack_status: tp.status, packed_units: units });
+            const tank = tp.tanks;
+            if (tank) {
+              const list = packTanksMap.get(link.project_id) ?? [];
+              list.push({ tank_name: tank.tank_name ?? null, tank_number: tank.tank_number });
+              packTanksMap.set(link.project_id, list);
             }
           }
         }
@@ -212,6 +224,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             pack_id: pack?.pack_id || null,
             pack_status: pack?.pack_status || null,
             packed_units: pack?.packed_units ?? null,
+            pack_tanks: packTanksMap.get(p.id) ?? [],
             bull_names: bullNameMap.get(p.id) || [],
             products_delivered: billing?.products_delivered ?? 0,
             products_total: billing?.products_total ?? 0,
@@ -814,6 +827,13 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                       {p.bull_names.length > 0 && (
                         <p className="mt-0.5 text-xs text-primary/80 truncate">
                           {p.bull_names.join(", ")}
+                        </p>
+                      )}
+                      {p.pack_tanks.length > 0 && (
+                        <p className="mt-0.5 text-xs text-muted-foreground truncate">
+                          Packed in: {p.pack_tanks
+                            .map((t) => (t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `#${t.tank_number}`))
+                            .join(", ")}
                         </p>
                       )}
                       {/* Product + labor summary strip */}
