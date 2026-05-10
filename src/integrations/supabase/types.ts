@@ -3289,6 +3289,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      stamp_order_items_received: {
+        Args: { _order_id: string; _recon: Json }
+        Returns: undefined
+      }
       transfer_inventory: {
         Args: {
           _dest_canister: string

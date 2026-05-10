@@ -10,6 +10,7 @@ import { InvoiceOrderModal } from "@/components/orders/InvoiceOrderModal";
 import {
   CalendarDays, Package, AlertTriangle, DollarSign,
   Droplets, Truck, ChevronRight, Clock, CheckCircle2, XCircle, Printer,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import { generateOperationsSummaryPdf } from "@/lib/generateOperationsSummaryPdf";
 
@@ -66,6 +67,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
     date: string;
     events: { id: string; eventName: string; eventTime: string | null; projectName: string; projectId: string; headCount: number }[];
   }[]>([]);
+  const [packedOutExpanded, setPackedOutExpanded] = useState(false);
   const [packedOut, setPackedOut] = useState<Array<{
     pack_id: string;
     status: string;
@@ -545,25 +547,29 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         .in("status", ["packed", "in_field", "shipped"]);
 
       if (packsData) {
-        const cards = (packsData as any[]).map((tp) => ({
-          pack_id: tp.id,
-          status: tp.status,
-          tank_name: tp.tanks?.tank_name ?? null,
-          tank_number: tp.tanks?.tank_number ?? "",
-          projects: (tp.tank_pack_projects ?? []).map((link: any) => ({
-            id: link.projects?.id ?? link.project_id,
-            name: link.projects?.name ?? "Unknown project",
-            customer_name: link.projects?.customers?.name ?? tp.customers?.name ?? null,
-            protocol: link.projects?.protocol ?? null,
-            head_count: link.projects?.head_count ?? null,
-            breeding_date: link.projects?.breeding_date ?? null,
-          })),
-          bulls: (tp.tank_pack_lines ?? []).map((l: any) => ({
-            bull_name: l.bull_name,
-            bull_code: l.bull_code,
-            units: l.units ?? 0,
-          })),
-        }));
+        const cards = (packsData as any[])
+          // Project packs only — shipment/pickup packs have their own
+          // lifecycle and don't belong on the Hub's daily-ops view.
+          .filter((tp) => Array.isArray(tp.tank_pack_projects) && tp.tank_pack_projects.length > 0)
+          .map((tp) => ({
+            pack_id: tp.id,
+            status: tp.status,
+            tank_name: tp.tanks?.tank_name ?? null,
+            tank_number: tp.tanks?.tank_number ?? "",
+            projects: (tp.tank_pack_projects ?? []).map((link: any) => ({
+              id: link.projects?.id ?? link.project_id,
+              name: link.projects?.name ?? "Unknown project",
+              customer_name: link.projects?.customers?.name ?? tp.customers?.name ?? null,
+              protocol: link.projects?.protocol ?? null,
+              head_count: link.projects?.head_count ?? null,
+              breeding_date: link.projects?.breeding_date ?? null,
+            })),
+            bulls: (tp.tank_pack_lines ?? []).map((l: any) => ({
+              bull_name: l.bull_name,
+              bull_code: l.bull_code,
+              units: l.units ?? 0,
+            })),
+          }));
         cards.sort((a, b) => {
           const ad = a.projects[0]?.breeding_date ?? "9999";
           const bd = b.projects[0]?.breeding_date ?? "9999";
@@ -898,12 +904,25 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       {/* TANKS PACKED OUT */}
       {packedOut.length > 0 && (
         <section className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold font-display">Tanks packed out</h2>
+          <button
+            type="button"
+            onClick={() => setPackedOutExpanded((v) => !v)}
+            className="flex items-baseline justify-between w-full text-left hover:opacity-80 transition-opacity"
+            aria-expanded={packedOutExpanded}
+          >
+            <div className="flex items-center gap-2">
+              {packedOutExpanded ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+              <h2 className="text-lg font-semibold font-display">Tanks packed out</h2>
+            </div>
             <span className="text-sm text-muted-foreground">
               {packedOut.length} tank{packedOut.length !== 1 ? "s" : ""}
             </span>
-          </div>
+          </button>
+          {packedOutExpanded && (
           <div className="grid gap-3 sm:grid-cols-2">
             {packedOut.map((p) => {
               const totalUnits = p.bulls.reduce((s, b) => s + b.units, 0);
@@ -964,6 +983,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
               );
             })}
           </div>
+          )}
         </section>
       )}
 
