@@ -155,7 +155,6 @@ export default function ReceiveDialog({
 }: ReceiveDialogProps) {
   const { orgId, userId } = useOrgRole();
   const [defaultTankId, setDefaultTankId] = useState<string>("");
-  const [defaultCanister, setDefaultCanister] = useState<string>("");
   const [perLineQty, setPerLineQty] = useState<Record<string, string>>({});
   const [perLineTank, setPerLineTank] = useState<Record<string, string>>({});
   const [perLineCanister, setPerLineCanister] = useState<Record<string, string>>({});
@@ -206,7 +205,6 @@ export default function ReceiveDialog({
       setPerLineQty({});
       setPerLineTank({});
       setPerLineCanister({});
-      setDefaultCanister("");
       if (tanks.length === 1) setDefaultTankId(tanks[0].id);
       else setDefaultTankId("");
     }
@@ -241,7 +239,7 @@ export default function ReceiveDialog({
       if (!tankId) {
         return { ok: false, msg: `${item.bull_name}: select a destination tank` };
       }
-      const canister = (perLineCanister[item.id] || defaultCanister || "").trim();
+      const canister = (perLineCanister[item.id] ?? "").trim();
       if (!canister) {
         return { ok: false, msg: `${item.bull_name}: enter a destination canister` };
       }
@@ -351,27 +349,16 @@ export default function ReceiveDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-3">
-            <div className="space-y-2">
-              <Label>Default destination tank</Label>
-              <TankCombobox
-                value={defaultTankId}
-                onChange={setDefaultTankId}
-                tanks={tanks}
-                placeholder="Select tank…"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Default canister</Label>
-              <Input
-                value={defaultCanister}
-                onChange={(e) => setDefaultCanister(e.target.value)}
-                placeholder="e.g. 1"
-                className="h-9"
-              />
-            </div>
+          <div className="space-y-2">
+            <Label>Default destination tank</Label>
+            <TankCombobox
+              value={defaultTankId}
+              onChange={setDefaultTankId}
+              tanks={tanks}
+              placeholder="Select tank…"
+            />
+            <p className="text-xs text-muted-foreground">Override per line below if needed. Canisters are entered per line — no default.</p>
           </div>
-          <p className="text-xs text-muted-foreground -mt-2">Override per line below if needed.</p>
 
           <div className="rounded-lg border border-border/50 overflow-hidden">
             <Table>
@@ -436,7 +423,7 @@ export default function ReceiveDialog({
                             onChange={(e) =>
                               setPerLineCanister((p) => ({ ...p, [item.id]: e.target.value }))
                             }
-                            placeholder={defaultCanister || "—"}
+                            placeholder="canister"
                             className="h-8 text-sm"
                             aria-label={`Canister for ${item.bull_name}`}
                           />

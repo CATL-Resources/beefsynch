@@ -181,6 +181,17 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
       return;
     }
 
+    // Inventory orders are POs to a supplier, so the supplier (semen company)
+    // is required. Mirrors the inventory_orders_require_company DB constraint.
+    if (orderType === "inventory" && (semenCompanyId === "none" || !semenCompanyId)) {
+      toast({
+        title: "Semen company required",
+        description: "Inventory orders must specify the supplier (semen company).",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Block save if any bull row has typed text but isn't linked to the catalog.
     // The database now requires every order line to have a real bull_catalog_id,
     // so we catch this here with a clear message instead of letting it fail at the DB.
@@ -355,7 +366,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
               source tank's owner_company_id. */}
           {orderType === "inventory" && (
             <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
-              <Label className="text-right text-sm">Company</Label>
+              <Label className="text-right text-sm">Company *</Label>
               <div>
                 <Select
                   value={semenCompanyId}

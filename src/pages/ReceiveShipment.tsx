@@ -1602,7 +1602,7 @@ const ReceiveShipment = () => {
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine(selectedOrderId || null)])}>
-                <Plus className="h-4 w-4 mr-1" /> Add Bull
+                <Plus className="h-4 w-4 mr-1" /> Add line
               </Button>
             </div>
           </CardHeader>
