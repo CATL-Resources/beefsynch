@@ -41,6 +41,7 @@ const ProjectsTab = ({ orgId }: { orgId: string }) => {
 
   const [bullsByProject, setBullsByProject] = useState<Record<string, { name: string; units: number; registrationNumber?: string; breed?: string }[]>>({});
   const [syncedProjectIds, setSyncedProjectIds] = useState<Set<string>>(new Set());
+  const [packedProjectIds, setPackedProjectIds] = useState<Set<string>>(new Set());
 
   const fetchProjects = useCallback(async () => {
     const { data } = await supabase
@@ -119,6 +120,22 @@ const ProjectsTab = ({ orgId }: { orgId: string }) => {
 
         if (syncData) {
           setSyncedProjectIds(new Set(syncData.map((r) => r.project_id)));
+        }
+
+        // Which projects have an active pack (not cancelled/unpacked/returned)?
+        const { data: packData } = await supabase
+          .from("tank_pack_projects")
+          .select("project_id, tank_packs!inner(status)")
+          .in("project_id", projectIds);
+        if (packData) {
+          const ids = new Set<string>();
+          for (const r of packData as any[]) {
+            const status = r.tank_packs?.status;
+            if (!status) continue;
+            if (["cancelled", "unpacked", "tank_returned"].includes(status)) continue;
+            ids.add(r.project_id);
+          }
+          setPackedProjectIds(ids);
         }
       }
     }
@@ -309,6 +326,7 @@ const ProjectsTab = ({ orgId }: { orgId: string }) => {
         onSelectionChange={setSelectedIds}
         bullsByProject={bullsByProject}
         syncedProjectIds={syncedProjectIds}
+        packedProjectIds={packedProjectIds}
         canEditAll={myRole === "owner" || myRole === "admin"}
         currentUserId={userId}
       />

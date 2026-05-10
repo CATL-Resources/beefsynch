@@ -138,6 +138,8 @@ const ProjectDetail = () => {
   const [orgGoogleCalendarId, setOrgGoogleCalendarId] = useState<string | null>(null);
   const [googleCalendarConfigured, setGoogleCalendarConfigured] = useState(isGoogleCalendarConfigured());
   const [customerEditOpen, setCustomerEditOpen] = useState(false);
+  const [activePacks, setActivePacks] = useState<{ pack_id: string; status: string; tank_name: string | null; tank_number: string | number }[]>([]);
+  const [hasActiveBilling, setHasActiveBilling] = useState(false);
 
   // Fetch org members for the contact dropdown
   const fetchOrgMembers = useCallback(async () => {
@@ -276,7 +278,7 @@ const ProjectDetail = () => {
   const load = async () => {
     if (!id) return;
     try {
-      const [pRes, eRes, bRes] = await Promise.all([
+      const [pRes, eRes, bRes, packRes, billRes] = await Promise.all([
         supabase.from("projects").select("*, customers!projects_customer_id_fkey(name)").eq("id", id).single(),
         supabase
           .from("protocol_events")
@@ -287,11 +289,35 @@ const ProjectDetail = () => {
           .from("project_bulls")
           .select("*, bulls_catalog(bull_name, company, registration_number, breed)")
           .eq("project_id", id),
+        supabase
+          .from("tank_pack_projects")
+          .select("tank_pack_id, tank_packs!inner(id, status, tanks!tank_packs_field_tank_id_fkey(tank_name, tank_number))")
+          .eq("project_id", id),
+        supabase
+          .from("project_billing_semen")
+          .select("units_packed, units_blown, units_billable")
+          .eq("project_id", id),
       ]);
 
       if (pRes.data) setProject(pRes.data as unknown as ProjectRow);
       if (eRes.data) setEvents(eRes.data as EventRow[]);
       if (bRes.data) setBulls(bRes.data as BullRow[]);
+
+      const packs = ((packRes.data ?? []) as any[])
+        .map((row) => row.tank_packs)
+        .filter((tp: any) => tp && !["cancelled", "unpacked", "tank_returned"].includes(tp.status))
+        .map((tp: any) => ({
+          pack_id: tp.id,
+          status: tp.status,
+          tank_name: tp.tanks?.tank_name ?? null,
+          tank_number: tp.tanks?.tank_number ?? "",
+        }));
+      setActivePacks(packs);
+
+      const billActive = ((billRes.data ?? []) as any[]).some(
+        (r) => (r.units_packed ?? 0) > 0 || (r.units_blown ?? 0) > 0 || (r.units_billable ?? 0) > 0,
+      );
+      setHasActiveBilling(billActive);
     } catch (err) {
       toast({ title: "Error", description: "Failed to load project details", variant: "destructive" });
     } finally {
@@ -705,7 +731,23 @@ const ProjectDetail = () => {
             >
               <FileDown className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" title="Pack Tank" onClick={() => navigate(`/pack-tank?projectId=${project.id}`)}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9"
+              title="Pack Tank"
+              onClick={() => {
+                if (activePacks.length > 0) {
+                  const labels = activePacks
+                    .map((p) => (p.tank_name ? `${p.tank_name} #${p.tank_number}` : `#${p.tank_number}`))
+                    .join(", ");
+                  if (!window.confirm(`This project already has a tank packed (${labels}). Pack another?`)) {
+                    return;
+                  }
+                }
+                navigate(`/pack-tank?projectId=${project.id}`);
+              }}
+            >
               <Package className="h-4 w-4" />
             </Button>
             <Button
@@ -790,6 +832,34 @@ const ProjectDetail = () => {
               {breedingTimeDisplay && ` at ${breedingTimeDisplay}`}
             </span>
           </div>
+          {(activePacks.length > 0 || hasActiveBilling) && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {activePacks.map((p) => (
+                <button
+                  key={p.pack_id}
+                  type="button"
+                  onClick={() => navigate(`/pack/${p.pack_id}`)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+                >
+                  <Package className="h-3.5 w-3.5" />
+                  Packed in: {p.tank_name ? `${p.tank_name} (#${p.tank_number})` : `#${p.tank_number}`}
+                  <Badge variant="outline" className="ml-1 capitalize text-[10px] h-4">
+                    {p.status.replace(/_/g, " ")}
+                  </Badge>
+                </button>
+              ))}
+              {hasActiveBilling && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/project/${project.id}/billing`)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border border-blue-500/30 bg-blue-500/15 text-blue-700 dark:text-blue-300 hover:bg-blue-500/25 transition-colors"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  Billing active
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Contact History */}

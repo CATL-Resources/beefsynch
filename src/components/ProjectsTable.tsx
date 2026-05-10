@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { BreedingProject } from "@/types/project";
-import { ArrowUpDown, Search, Filter, CalendarCheck } from "lucide-react";
+import { ArrowUpDown, Search, Filter, CalendarCheck, PackageCheck } from "lucide-react";
 import ClickableRegNumber from "@/components/ClickableRegNumber";
 import { format, parseISO } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,6 +14,7 @@ interface ProjectsTableProps {
   onSelectionChange: (ids: Set<string>) => void;
   bullsByProject?: Record<string, { name: string; units: number; registrationNumber?: string; breed?: string }[]>;
   syncedProjectIds?: Set<string>;
+  packedProjectIds?: Set<string>;
   canEditAll?: boolean;
   currentUserId?: string | null;
 }
@@ -22,7 +23,7 @@ type SortKey = keyof BreedingProject;
 type SortDir = "asc" | "desc";
 
 // calendar-sync indicator v4
-const ProjectsTable = ({ projects, selectedIds, onSelectionChange, bullsByProject = {}, syncedProjectIds = new Set(), canEditAll = false, currentUserId = null }: ProjectsTableProps) => {
+const ProjectsTable = ({ projects, selectedIds, onSelectionChange, bullsByProject = {}, syncedProjectIds = new Set(), packedProjectIds = new Set(), canEditAll = false, currentUserId = null }: ProjectsTableProps) => {
   const navigate = useNavigate();
 
   const canSelectProject = (_project: BreedingProject) => {
@@ -261,6 +262,16 @@ const ProjectsTable = ({ projects, selectedIds, onSelectionChange, bullsByProjec
                         </Tooltip>
                       </TooltipProvider>
                     )}
+                    {packedProjectIds.has(project.id) && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <PackageCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent>Tank already packed</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground truncate" title={project.customerName || ""}>
                     {project.customerName || "—"}
@@ -335,6 +346,9 @@ const ProjectsTable = ({ projects, selectedIds, onSelectionChange, bullsByProjec
                       {project.name}
                       {syncedProjectIds.has(project.id) && (
                         <CalendarCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+                      )}
+                      {packedProjectIds.has(project.id) && (
+                        <PackageCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1">

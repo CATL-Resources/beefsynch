@@ -66,6 +66,23 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
     date: string;
     events: { id: string; eventName: string; eventTime: string | null; projectName: string; projectId: string; headCount: number }[];
   }[]>([]);
+  const [packedOut, setPackedOut] = useState<Array<{
+    pack_id: string;
+    status: string;
+    tank_name: string | null;
+    tank_number: string | number;
+    projects: { id: string; name: string; customer_name: string | null; protocol: string | null; head_count: number | null; breeding_date: string | null }[];
+    bulls: { bull_name: string; bull_code: string | null; units: number }[];
+  }>>([]);
+  const [needsPacking, setNeedsPacking] = useState<Array<{
+    project_id: string;
+    name: string;
+    customer_name: string | null;
+    protocol: string | null;
+    head_count: number | null;
+    breeding_date: string;
+    bulls: { bull_name: string; naab_code: string | null; units: number }[];
+  }>>([]);
   const [readyToInvoice, setReadyToInvoice] = useState<Array<{
     id: string;
     customerName: string;
@@ -510,6 +527,112 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         setWeekEvents(result);
       }
 
+      // ── TANKS PACKED OUT ──────────────────────────────────────────────
+      const { data: packsData } = await supabase
+        .from("tank_packs")
+        .select(`
+          id, status, packed_at, customer_id, field_tank_id,
+          tanks!tank_packs_field_tank_id_fkey(tank_name, tank_number),
+          customers!tank_packs_customer_id_fkey(name),
+          tank_pack_lines(bull_name, bull_code, units),
+          tank_pack_projects(
+            project_id,
+            projects(id, name, protocol, head_count, breeding_date,
+              customers!projects_customer_id_fkey(name))
+          )
+        `)
+        .eq("organization_id", orgId)
+        .in("status", ["packed", "in_field", "shipped"]);
+
+      if (packsData) {
+        const cards = (packsData as any[]).map((tp) => ({
+          pack_id: tp.id,
+          status: tp.status,
+          tank_name: tp.tanks?.tank_name ?? null,
+          tank_number: tp.tanks?.tank_number ?? "",
+          projects: (tp.tank_pack_projects ?? []).map((link: any) => ({
+            id: link.projects?.id ?? link.project_id,
+            name: link.projects?.name ?? "Unknown project",
+            customer_name: link.projects?.customers?.name ?? tp.customers?.name ?? null,
+            protocol: link.projects?.protocol ?? null,
+            head_count: link.projects?.head_count ?? null,
+            breeding_date: link.projects?.breeding_date ?? null,
+          })),
+          bulls: (tp.tank_pack_lines ?? []).map((l: any) => ({
+            bull_name: l.bull_name,
+            bull_code: l.bull_code,
+            units: l.units ?? 0,
+          })),
+        }));
+        cards.sort((a, b) => {
+          const ad = a.projects[0]?.breeding_date ?? "9999";
+          const bd = b.projects[0]?.breeding_date ?? "9999";
+          return ad.localeCompare(bd);
+        });
+        setPackedOut(cards);
+      }
+
+      // ── NEEDS PACKING (next 7 days) ───────────────────────────────────
+      const day7 = format(addDays(new Date(), 7), "yyyy-MM-dd");
+      const { data: nextProjects } = await supabase
+        .from("projects")
+        .select(`
+          id, name, protocol, head_count, breeding_date,
+          customers!projects_customer_id_fkey(name)
+        `)
+        .eq("organization_id", orgId)
+        .not("status", "in", '("Work Complete","Invoiced")')
+        .gte("breeding_date", today)
+        .lte("breeding_date", day7)
+        .order("breeding_date");
+
+      if (nextProjects) {
+        const ids = nextProjects.map((p: any) => p.id);
+        const packedSet = new Set<string>();
+        if (ids.length > 0) {
+          const { data: packLinks } = await supabase
+            .from("tank_pack_projects")
+            .select("project_id, tank_packs!inner(status)")
+            .in("project_id", ids);
+          for (const r of (packLinks ?? []) as any[]) {
+            const s = r.tank_packs?.status;
+            if (!s) continue;
+            if (["cancelled", "unpacked", "tank_returned"].includes(s)) continue;
+            packedSet.add(r.project_id);
+          }
+        }
+        const unpackedProjectIds = ids.filter((pid: string) => !packedSet.has(pid));
+        const projBullsMap = new Map<string, { bull_name: string; naab_code: string | null; units: number }[]>();
+        if (unpackedProjectIds.length > 0) {
+          const { data: pb } = await supabase
+            .from("project_bulls")
+            .select("project_id, units, custom_bull_name, bulls_catalog(bull_name, naab_code)")
+            .in("project_id", unpackedProjectIds);
+          for (const r of (pb ?? []) as any[]) {
+            const list = projBullsMap.get(r.project_id) ?? [];
+            list.push({
+              bull_name: r.bulls_catalog?.bull_name ?? r.custom_bull_name ?? "Unknown",
+              naab_code: r.bulls_catalog?.naab_code ?? null,
+              units: r.units ?? 0,
+            });
+            projBullsMap.set(r.project_id, list);
+          }
+        }
+        setNeedsPacking(
+          nextProjects
+            .filter((p: any) => unpackedProjectIds.includes(p.id))
+            .map((p: any) => ({
+              project_id: p.id,
+              name: p.name,
+              customer_name: p.customers?.name ?? null,
+              protocol: p.protocol ?? null,
+              head_count: p.head_count ?? null,
+              breeding_date: p.breeding_date,
+              bulls: projBullsMap.get(p.id) ?? [],
+            })),
+        );
+      }
+
       setLoading(false);
     };
 
@@ -769,6 +892,143 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
               </div>
             </CardContent>
           </Card>
+        </section>
+      )}
+
+      {/* TANKS PACKED OUT */}
+      {packedOut.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold font-display">Tanks packed out</h2>
+            <span className="text-sm text-muted-foreground">
+              {packedOut.length} tank{packedOut.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {packedOut.map((p) => {
+              const totalUnits = p.bulls.reduce((s, b) => s + b.units, 0);
+              return (
+                <Card
+                  key={p.pack_id}
+                  className="cursor-pointer border-emerald-500/30 bg-emerald-500/5 transition-colors hover:bg-emerald-500/10"
+                  onClick={() => navigate(`/pack/${p.pack_id}`)}
+                >
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Package className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold text-sm truncate">
+                          {p.tank_name ? `${p.tank_name} (#${p.tank_number})` : `Tank #${p.tank_number}`}
+                        </span>
+                      </div>
+                      <Badge variant="outline" className="capitalize text-[10px]">
+                        {p.status.replace(/_/g, " ")}
+                      </Badge>
+                    </div>
+                    {p.projects.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No project linked</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {p.projects.map((proj) => (
+                          <div key={proj.id} className="text-xs">
+                            <div className="font-medium truncate">{proj.customer_name ?? "—"}</div>
+                            <div className="text-muted-foreground truncate">
+                              {proj.name}
+                              {proj.protocol ? ` · ${proj.protocol}` : ""}
+                              {proj.head_count != null ? ` · ${proj.head_count} hd` : ""}
+                              {proj.breeding_date ? ` · ${format(parseISO(proj.breeding_date), "MMM d")}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {p.bulls.length > 0 && (
+                      <div className="border-t border-border/40 pt-2 space-y-0.5 text-xs">
+                        {p.bulls.map((b, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-2">
+                            <span className="truncate">
+                              {b.bull_name}
+                              {b.bull_code ? <span className="text-muted-foreground"> · {b.bull_code}</span> : null}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">{b.units}u</span>
+                          </div>
+                        ))}
+                        <div className="flex items-baseline justify-between gap-2 pt-1 font-semibold">
+                          <span>Total</span>
+                          <span className="tabular-nums">{totalUnits}u</span>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* NEEDS PACKING — NEXT 7 DAYS */}
+      {needsPacking.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold font-display">Needs packing — next 7 days</h2>
+            <span className="text-sm text-muted-foreground">
+              {needsPacking.length} project{needsPacking.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {needsPacking.map((p) => {
+              const d = startOfDay(parseISO(p.breeding_date));
+              const diffDays = Math.round((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              const isUrgent = diffDays <= 2;
+              return (
+                <Card
+                  key={p.project_id}
+                  className={`border-amber-500/40 bg-amber-500/5 transition-colors hover:bg-amber-500/10`}
+                >
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{p.customer_name ?? "—"}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {p.name}
+                          {p.protocol ? ` · ${p.protocol}` : ""}
+                          {p.head_count != null ? ` · ${p.head_count} hd` : ""}
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={isUrgent ? "bg-destructive/15 text-destructive border-destructive/40" : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40"}
+                      >
+                        {diffDays === 0 ? "TODAY" : diffDays === 1 ? "Tomorrow" : `${diffDays}d`}
+                      </Badge>
+                    </div>
+                    {p.bulls.length > 0 && (
+                      <div className="border-t border-border/40 pt-2 space-y-0.5 text-xs">
+                        {p.bulls.map((b, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-2">
+                            <span className="truncate">
+                              {b.bull_name}
+                              {b.naab_code ? <span className="text-muted-foreground"> · {b.naab_code}</span> : null}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">{b.units}u</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={() => navigate(`/pack-tank?projectId=${p.project_id}`)}
+                      >
+                        <Package className="h-3.5 w-3.5 mr-1.5" /> Pack tank
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
         </section>
       )}
 
