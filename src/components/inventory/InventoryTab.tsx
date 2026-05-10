@@ -195,40 +195,38 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     inventoriedAt: item.inventoried_at,
   })), [inventory]);
 
-  // Distinct catalog bulls in view — used to fetch project/order pill counts
-  // in one shot rather than one query per row.
-  const distinctBullCatalogIds = useMemo(
-    () => Array.from(new Set(rows.map((r: any) => r.bullCatalogId).filter(Boolean))) as string[],
-    [rows],
-  );
-
+  // Active project + order counts per catalog bull. We fetch *all* org rows
+  // rather than passing distinct bull_catalog_ids in an .in() clause —
+  // PostgREST's URL length cap can't take ~1k UUIDs and the request fails
+  // silently. RLS + the org-scoped projects/orders embeds keep the result
+  // size sane.
   const { data: bullActivity = { projects: {}, orders: {} } } = useQuery({
-    queryKey: ["inventory_bull_activity", distinctBullCatalogIds],
-    enabled: distinctBullCatalogIds.length > 0,
+    queryKey: ["inventory_bull_activity", orgId],
+    enabled: !!orgId,
     queryFn: async () => {
       const projects: Record<string, number> = {};
       const orders: Record<string, number> = {};
       const [projRes, ordRes] = await Promise.all([
         supabase
           .from("project_bulls")
-          .select("bull_catalog_id, projects!inner(status)")
-          .in("bull_catalog_id", distinctBullCatalogIds),
+          .select("bull_catalog_id, projects!inner(status, organization_id)")
+          .eq("projects.organization_id", orgId!)
+          .not("bull_catalog_id", "is", null),
         supabase
           .from("semen_order_items")
-          .select("bull_catalog_id, item_status, semen_orders!inner(fulfillment_status)")
-          .in("bull_catalog_id", distinctBullCatalogIds),
+          .select("bull_catalog_id, item_status, semen_orders!inner(fulfillment_status, organization_id)")
+          .eq("semen_orders.organization_id", orgId!)
+          .not("bull_catalog_id", "is", null),
       ]);
       for (const r of (projRes.data ?? []) as any[]) {
         const status = r.projects?.status;
         if (status === "Work Complete" || status === "Invoiced") continue;
-        if (!r.bull_catalog_id) continue;
         projects[r.bull_catalog_id] = (projects[r.bull_catalog_id] ?? 0) + 1;
       }
       for (const r of (ordRes.data ?? []) as any[]) {
         if (r.item_status === "cancelled") continue;
         const fs = r.semen_orders?.fulfillment_status;
         if (fs === "cancelled") continue;
-        if (!r.bull_catalog_id) continue;
         orders[r.bull_catalog_id] = (orders[r.bull_catalog_id] ?? 0) + 1;
       }
       return { projects, orders };
