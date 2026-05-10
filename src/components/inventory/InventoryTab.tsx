@@ -223,10 +223,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
         if (status === "Work Complete" || status === "Invoiced") continue;
         projects[r.bull_catalog_id] = (projects[r.bull_catalog_id] ?? 0) + 1;
       }
+      const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
+      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled"]);
       for (const r of (ordRes.data ?? []) as any[]) {
-        if (r.item_status === "cancelled") continue;
-        const fs = r.semen_orders?.fulfillment_status;
-        if (fs === "cancelled") continue;
+        if (TERMINAL_ITEM.has(r.item_status)) continue;
+        if (TERMINAL_ORDER.has(r.semen_orders?.fulfillment_status)) continue;
         orders[r.bull_catalog_id] = (orders[r.bull_catalog_id] ?? 0) + 1;
       }
       return { projects, orders };
@@ -260,8 +261,10 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
         const s = r.projects?.status;
         return s !== "Work Complete" && s !== "Invoiced";
       });
+      const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
+      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled"]);
       const orders = (ordRes.data ?? []).filter((r: any) =>
-        r.item_status !== "cancelled" && r.semen_orders?.fulfillment_status !== "cancelled",
+        !TERMINAL_ITEM.has(r.item_status) && !TERMINAL_ORDER.has(r.semen_orders?.fulfillment_status),
       );
       return { projects, orders };
     },
