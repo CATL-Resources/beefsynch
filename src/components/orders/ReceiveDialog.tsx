@@ -35,7 +35,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react";
 
 export interface ReceiveDialogItem {
   id: string;
@@ -155,9 +155,10 @@ export default function ReceiveDialog({
 }: ReceiveDialogProps) {
   const { orgId, userId } = useOrgRole();
   const [defaultTankId, setDefaultTankId] = useState<string>("");
-  const [perLineQty, setPerLineQty] = useState<Record<string, string>>({});
-  const [perLineTank, setPerLineTank] = useState<Record<string, string>>({});
-  const [perLineCanister, setPerLineCanister] = useState<Record<string, string>>({});
+  // Per-item splits — one bull can land in multiple canisters / tanks. Each
+  // split becomes its own draft_line on submit.
+  type Split = { key: string; units: string; tankId: string; canister: string };
+  const [splits, setSplits] = useState<Record<string, Split[]>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const pending = useMemo(
@@ -200,19 +201,39 @@ export default function ReceiveDialog({
     },
   });
 
+  const makeSplit = (): Split => ({
+    key: crypto.randomUUID(),
+    units: "",
+    tankId: "",
+    canister: "",
+  });
+
   useEffect(() => {
     if (open) {
-      setPerLineQty({});
-      setPerLineTank({});
-      setPerLineCanister({});
+      const initial: Record<string, Split[]> = {};
+      for (const item of pending) initial[item.id] = [makeSplit()];
+      setSplits(initial);
       if (tanks.length === 1) setDefaultTankId(tanks[0].id);
       else setDefaultTankId("");
     }
-  }, [open, tanks.length]);
+  }, [open, tanks.length, pending.length]);
 
-  const setQty = (id: string, v: string) => {
+  const updateSplit = (itemId: string, splitKey: string, patch: Partial<Split>) =>
+    setSplits((p) => ({
+      ...p,
+      [itemId]: (p[itemId] ?? []).map((s) => (s.key === splitKey ? { ...s, ...patch } : s)),
+    }));
+  const addSplit = (itemId: string) =>
+    setSplits((p) => ({ ...p, [itemId]: [...(p[itemId] ?? []), makeSplit()] }));
+  const removeSplit = (itemId: string, splitKey: string) =>
+    setSplits((p) => ({
+      ...p,
+      [itemId]: (p[itemId] ?? []).filter((s) => s.key !== splitKey),
+    }));
+
+  const setQty = (itemId: string, splitKey: string, v: string) => {
     const digits = v.replace(/[^0-9]/g, "");
-    setPerLineQty((p) => ({ ...p, [id]: digits }));
+    updateSplit(itemId, splitKey, { units: digits });
   };
 
   type DraftLine = {
@@ -228,30 +249,32 @@ export default function ReceiveDialog({
   const validate = (): { ok: true; draftLines: DraftLine[] } | { ok: false; msg: string } => {
     const draftLines: DraftLine[] = [];
     for (const item of pending) {
-      const raw = perLineQty[item.id] ?? "";
-      if (raw === "") continue;
-      const units = parseInt(raw, 10);
-      if (!Number.isFinite(units) || units < 0) {
-        return { ok: false, msg: `Invalid quantity for ${item.bull_name}` };
+      const itemSplits = splits[item.id] ?? [];
+      for (const s of itemSplits) {
+        if (s.units === "") continue;
+        const units = parseInt(s.units, 10);
+        if (!Number.isFinite(units) || units < 0) {
+          return { ok: false, msg: `Invalid quantity for ${item.bull_name}` };
+        }
+        if (units === 0) continue;
+        const tankId = s.tankId || defaultTankId;
+        if (!tankId) {
+          return { ok: false, msg: `${item.bull_name}: select a destination tank` };
+        }
+        const canister = s.canister.trim();
+        if (!canister) {
+          return { ok: false, msg: `${item.bull_name}: enter a destination canister` };
+        }
+        draftLines.push({
+          bullCatalogId: item.bull_catalog_id,
+          bullName: item.bull_name,
+          bullCode: item.naab_code ?? "",
+          tankId,
+          canister,
+          units,
+          itemType: "semen",
+        });
       }
-      if (units === 0) continue;
-      const tankId = perLineTank[item.id] || defaultTankId;
-      if (!tankId) {
-        return { ok: false, msg: `${item.bull_name}: select a destination tank` };
-      }
-      const canister = (perLineCanister[item.id] ?? "").trim();
-      if (!canister) {
-        return { ok: false, msg: `${item.bull_name}: enter a destination canister` };
-      }
-      draftLines.push({
-        bullCatalogId: item.bull_catalog_id,
-        bullName: item.bull_name,
-        bullCode: item.naab_code ?? "",
-        tankId,
-        canister,
-        units,
-        itemType: "semen",
-      });
     }
     if (draftLines.length === 0) {
       return { ok: false, msg: "Enter a quantity for at least one bull" };
@@ -381,55 +404,84 @@ export default function ReceiveDialog({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  pending.map((item) => {
+                  pending.flatMap((item) => {
                     const remaining = item.units - item.units_received;
-                    return (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-medium">{item.bull_name}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs">
-                          {item.naab_code ?? "—"}
+                    const itemSplits = splits[item.id] ?? [];
+                    const rows = itemSplits.map((s, idx) => (
+                      <TableRow key={`${item.id}:${s.key}`} className={idx > 0 ? "bg-muted/10" : ""}>
+                        <TableCell className="font-medium">
+                          {idx === 0 ? item.bull_name : <span className="text-xs text-muted-foreground pl-3">↳ split</span>}
                         </TableCell>
-                        <TableCell className="text-right">{item.units}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {idx === 0 ? (item.naab_code ?? "—") : ""}
+                        </TableCell>
+                        <TableCell className="text-right">{idx === 0 ? item.units : ""}</TableCell>
                         <TableCell className="text-right text-muted-foreground">
-                          {item.units_received}
+                          {idx === 0 ? item.units_received : ""}
                         </TableCell>
                         <TableCell className="text-right">
                           <Input
                             inputMode="numeric"
-                            value={perLineQty[item.id] ?? ""}
-                            onChange={(e) => setQty(item.id, e.target.value)}
+                            value={s.units}
+                            onChange={(e) => setQty(item.id, s.key, e.target.value)}
                             placeholder="0"
                             className="h-8 text-right"
                             aria-label={`Receive units for ${item.bull_name}`}
                           />
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {remaining} pending
-                          </div>
+                          {idx === 0 && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              {remaining} pending
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <TankCombobox
-                            value={perLineTank[item.id] ?? ""}
-                            onChange={(id) =>
-                              setPerLineTank((p) => ({ ...p, [item.id]: id }))
-                            }
+                            value={s.tankId}
+                            onChange={(id) => updateSplit(item.id, s.key, { tankId: id })}
                             tanks={tanks}
                             placeholder="(use default)"
                             size="sm"
                           />
                         </TableCell>
                         <TableCell>
-                          <Input
-                            value={perLineCanister[item.id] ?? ""}
-                            onChange={(e) =>
-                              setPerLineCanister((p) => ({ ...p, [item.id]: e.target.value }))
-                            }
-                            placeholder="canister"
-                            className="h-8 text-sm"
-                            aria-label={`Canister for ${item.bull_name}`}
-                          />
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={s.canister}
+                              onChange={(e) => updateSplit(item.id, s.key, { canister: e.target.value })}
+                              placeholder="canister"
+                              className="h-8 text-sm"
+                              aria-label={`Canister for ${item.bull_name}`}
+                            />
+                            {itemSplits.length > 1 && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
+                                onClick={() => removeSplit(item.id, s.key)}
+                                title="Remove split"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
+                    ));
+                    rows.push(
+                      <TableRow key={`${item.id}:add`} className="bg-muted/5">
+                        <TableCell colSpan={7} className="py-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs gap-1"
+                            onClick={() => addSplit(item.id)}
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Split into another canister / tank
+                          </Button>
+                        </TableCell>
+                      </TableRow>,
                     );
+                    return rows;
                   })
                 )}
               </TableBody>
