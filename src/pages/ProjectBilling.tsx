@@ -27,6 +27,7 @@ import BillingTab from "@/components/billing/BillingTab";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import PackForProjectDialog from "@/components/billing/PackForProjectDialog";
 import EditPackDialog from "@/components/billing/EditPackDialog";
+import UnpackFromProjectDialog from "@/components/billing/UnpackFromProjectDialog";
 
 import {
   BillingProduct, ProductLine, SessionLine, SessionInventoryLine, SemenLine, LaborLine,
@@ -61,6 +62,7 @@ const ProjectBilling = () => {
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [packDialogOpen, setPackDialogOpen] = useState(false);
   const [editPackOpen, setEditPackOpen] = useState(false);
+  const [unpackDialogOpen, setUnpackDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1118,8 +1120,8 @@ const ProjectBilling = () => {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48">
-                  {hasPack && !isUnpacked && (
-                    <DropdownMenuItem onClick={() => toast({ title: "Coming soon", description: "Unpack tank flow lands in a follow-up." })}>
+                  {hasPack && packStatus !== "unpacked" && packStatus !== "cancelled" && (
+                    <DropdownMenuItem onClick={() => setUnpackDialogOpen(true)}>
                       <Package className="h-4 w-4 mr-2" /> Unpack tank
                     </DropdownMenuItem>
                   )}
@@ -1128,7 +1130,7 @@ const ProjectBilling = () => {
                       <Edit className="h-4 w-4 mr-2" /> Edit pack
                     </DropdownMenuItem>
                   )}
-                  {hasPack && (!isUnpacked || packStatus === "packed") && <DropdownMenuSeparator />}
+                  {hasPack && packStatus !== "cancelled" && <DropdownMenuSeparator />}
                   <DropdownMenuItem onClick={closeOutProject}>
                     <CheckCircle className="h-4 w-4 mr-2" /> Close out
                   </DropdownMenuItem>
@@ -1451,6 +1453,19 @@ const ProjectBilling = () => {
           organizationId={orgId}
           fieldTankId={firstPack.field_tank_id}
           onEditComplete={() => loadData()}
+        />
+      )}
+      {firstPack?.id && orgId && firstPack?.field_tank_id && (
+        <UnpackFromProjectDialog
+          open={unpackDialogOpen}
+          onOpenChange={setUnpackDialogOpen}
+          packId={firstPack.id}
+          fieldTankId={firstPack.field_tank_id}
+          fieldTankLabel={packTankLabel || null}
+          organizationId={orgId}
+          billingId={billingId}
+          projectName={project?.name ?? null}
+          onUnpackComplete={() => loadData()}
         />
       )}
       <AppFooter />
