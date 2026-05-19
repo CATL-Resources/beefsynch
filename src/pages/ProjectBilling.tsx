@@ -24,6 +24,7 @@ import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import BillingTab from "@/components/billing/BillingTab";
 import NewProjectDialog from "@/components/NewProjectDialog";
+import PackForProjectDialog from "@/components/billing/PackForProjectDialog";
 
 import {
   BillingProduct, ProductLine, SessionLine, SessionInventoryLine, SemenLine, LaborLine,
@@ -55,6 +56,7 @@ const ProjectBilling = () => {
   const [laborLines, setLaborLines] = useState<LaborLine[]>([]);
 
   const [editProjectOpen, setEditProjectOpen] = useState(false);
+  const [packDialogOpen, setPackDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1156,40 +1158,45 @@ const ProjectBilling = () => {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* ── Pack status bar ── */}
-        <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-muted/50 rounded-lg flex-wrap">
-          <div className="flex items-center gap-2 text-sm">
-            {hasPack ? (
-              <>
-                {isUnpacked
-                  ? <Check className="h-4 w-4 text-emerald-600" />
-                  : <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />}
-                <span className="font-medium">{isUnpacked ? "Unpacked" : "Packed"}</span>
-                {packTankLabel && <span className="text-muted-foreground">— Tank #{packTankLabel}</span>}
-              </>
-            ) : (
-              <span className="text-muted-foreground">Not packed</span>
-            )}
+        {/* ── Empty state (no pack yet) ── */}
+        {!hasPack ? (
+          <div className="rounded-lg border-2 border-dashed border-border/60 px-4 py-8 flex flex-col items-center justify-center gap-3 text-center">
+            <Package className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">No tank packed for this project yet</p>
+            <Button onClick={() => setPackDialogOpen(true)} className="gap-1.5">
+              <Package className="h-4 w-4" /> Pack tank for this project
+            </Button>
           </div>
-          <div className="flex gap-2">
-            {!hasPack && (
-              <Button variant="outline" size="sm" className="h-8 text-xs"
-                onClick={() => navigate(`/pack-tank?projectId=${projectId}`)}>
-                <Package className="h-3.5 w-3.5 mr-1" /> Pack Tank
-              </Button>
-            )}
-            {hasPack && firstPack && (
-              <Button variant="outline" size="sm" className="h-8 text-xs"
-                onClick={() => navigate(`/pack/${firstPack.id}`)}>View Pack</Button>
-            )}
-            {hasPack && !isUnpacked && firstPack && (
-              <Button variant="outline" size="sm" className="h-8 text-xs"
-                onClick={() => navigate(`/unpack/${firstPack.id}`)}>
-                <PackageOpen className="h-3.5 w-3.5 mr-1" /> Unpack Tank
-              </Button>
-            )}
+        ) : (
+          /* ── Pack status bar ── */
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-muted/50 rounded-lg flex-wrap">
+            <div className="flex items-center gap-2 text-sm">
+              {isUnpacked
+                ? <Check className="h-4 w-4 text-emerald-600" />
+                : <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />}
+              <span className="font-medium">{isUnpacked ? "Unpacked" : "Packed"}</span>
+              {packTankLabel && <span className="text-muted-foreground">— Tank #{packTankLabel}</span>}
+            </div>
+            <div className="flex gap-2">
+              {firstPack && (
+                <Button variant="outline" size="sm" className="h-8 text-xs"
+                  onClick={() => navigate(`/pack/${firstPack.id}`)}>View Pack</Button>
+              )}
+              {!isUnpacked && firstPack && (
+                <Button variant="outline" size="sm" className="h-8 text-xs"
+                  onClick={() => navigate(`/unpack/${firstPack.id}`)}>
+                  <PackageOpen className="h-3.5 w-3.5 mr-1" /> Unpack Tank
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
+
+        {!hasPack && (
+          <p className="text-xs text-muted-foreground italic">Sessions will appear after packing</p>
+        )}
+
+        <div className={hasPack ? "" : "opacity-40 pointer-events-none"}>
 
         {/* ── Breeding Sessions ── */}
         {(() => {
@@ -1312,6 +1319,7 @@ const ProjectBilling = () => {
             currentStatus={currentStatus}
           />
         </fieldset>
+        </div>
       </main>
 
       {/* Save confirmation toast */}
@@ -1347,6 +1355,16 @@ const ProjectBilling = () => {
           })),
         } : null}
       />
+      {projectId && orgId && (
+        <PackForProjectDialog
+          open={packDialogOpen}
+          onOpenChange={setPackDialogOpen}
+          projectId={projectId}
+          projectName={project?.name ?? null}
+          organizationId={orgId}
+          onPackComplete={() => loadData()}
+        />
+      )}
       <AppFooter />
     </div>
   );
