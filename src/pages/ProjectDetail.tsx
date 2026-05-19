@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, Calendar, FileDown, FileText, Download, Pencil, MoreVertical, Star, Trash2, UserCheck, ExternalLink, Loader2, Plus, Package, ClipboardList } from "lucide-react";
+import { ArrowLeft, Calendar, FileText, Download, Pencil, MoreVertical, Star, Trash2, UserCheck, ExternalLink, Loader2, Plus, ClipboardList, Settings } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import NewProjectDialog from "@/components/NewProjectDialog";
@@ -9,7 +9,6 @@ import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import CustomerPicker from "@/components/CustomerPicker";
 import { generateProjectPdf } from "@/lib/generateProjectPdf";
 import { generateProjectCsv } from "@/lib/generateProjectCsv";
-import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import { buildProjectIcsEvents, generateIcsFile, downloadIcsFile } from "@/lib/generateIcs";
 import {
@@ -612,163 +611,75 @@ const ProjectDetail = () => {
     <div className="min-h-screen">
       <div className="container mx-auto px-4 py-6 space-y-6 max-w-4xl">
         {/* Top actions */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <Button variant="ghost" size="sm" onClick={() => navigate("/operations")}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
           <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="lg:hidden h-9 w-9" title="Export">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-50 w-56 bg-popover border border-border shadow-lg">
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2"
-                  onClick={openEventsInBrowser}
-                >
-                  <Calendar className="h-4 w-4" /> Open events in Google Calendar
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2"
-                  onClick={() => {
-                    const bullsForIcs = bulls.map((b) => ({
-                      bull_name: getBullDisplayName(b),
-                      registration_number: b.bulls_catalog ? b.bulls_catalog.registration_number : "",
-                      units: b.units,
-                    }));
-                    const icsEvents = buildProjectIcsEvents(project, events, bullsForIcs);
-                    const icsContent = generateIcsFile(icsEvents, `${project.name} — BeefSynch`);
-                    const safeName = project.name.replace(/\s+/g, "_");
-                    downloadIcsFile(icsContent, `${safeName}_BeefSynch.ics`);
-                    toast({ title: "Calendar downloaded", description: `${project.name} .ics file saved.` });
-                  }}
-                >
-                  <Download className="h-4 w-4" /> Download .ics
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2"
-                  onClick={() => {
-                    generateProjectCsv(project, events, bulls);
-                    toast({ title: "CSV downloaded", description: `${project.name} CSV saved.` });
-                  }}
-                >
-                  <Download className="h-4 w-4" /> Download CSV
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteOpen(true)}>
-                  <Trash2 className="h-4 w-4" /> Delete Project
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="hidden lg:inline-flex h-9 w-9" title="Export">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-50 w-56 bg-popover border border-border shadow-lg">
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2"
-                  onClick={openEventsInBrowser}
-                >
-                  <Calendar className="h-4 w-4" /> Open events in Google Calendar
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2"
-                  onClick={() => {
-                    const bullsForIcs = bulls.map((b) => ({
-                      bull_name: getBullDisplayName(b),
-                      registration_number: b.bulls_catalog ? b.bulls_catalog.registration_number : "",
-                      units: b.units,
-                    }));
-                    const icsEvents = buildProjectIcsEvents(project, events, bullsForIcs);
-                    const icsContent = generateIcsFile(icsEvents, `${project.name} — BeefSynch`);
-                    const safeName = project.name.replace(/\s+/g, "_");
-                    downloadIcsFile(icsContent, `${safeName}_BeefSynch.ics`);
-                    toast({ title: "Calendar downloaded", description: `${project.name} .ics file saved.` });
-                  }}
-                >
-                  <Download className="h-4 w-4" /> Download .ics
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2"
-                  onClick={() => {
-                    generateProjectCsv(project, events, bulls);
-                    toast({ title: "CSV downloaded", description: `${project.name} CSV saved.` });
-                  }}
-                >
-                  <Download className="h-4 w-4" /> Download CSV
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteOpen(true)}>
-                  <Trash2 className="h-4 w-4" /> Delete Project
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
             <Button
-              variant="outline"
               size="sm"
-              className="lg:hidden"
-              title="Share PDF"
-              onClick={() => {
-                generateProjectPdf(project, events, bulls);
-                toast({ title: "PDF downloaded", description: `${project.name} report saved.` });
-              }}
+              className="h-9 bg-emerald-600 hover:bg-emerald-600/90 text-white"
+              onClick={() => navigate(`/project/${project.id}/billing`)}
             >
-              <FileDown className="h-4 w-4" />
+              <ClipboardList className="h-4 w-4 mr-1.5" /> Project sheet
             </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="hidden lg:inline-flex h-9 w-9"
-              title="Share PDF"
-              onClick={() => {
-                generateProjectPdf(project, events, bulls);
-                toast({ title: "PDF downloaded", description: `${project.name} report saved.` });
-              }}
-            >
-              <FileDown className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9"
-              title="Pack Tank"
-              onClick={() => {
-                if (activePacks.length > 0) {
-                  const labels = activePacks
-                    .map((p) => (p.tank_name ? `${p.tank_name} #${p.tank_number}` : `#${p.tank_number}`))
-                    .join(", ");
-                  if (!window.confirm(`This project already has a tank packed (${labels}). Pack another?`)) {
-                    return;
-                  }
-                }
-                navigate(`/pack-tank?projectId=${project.id}`);
-              }}
-            >
-              <Package className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9"
-              title="Breeding Worksheet"
-              onClick={async () => {
-                if (!project) return;
-                await printBreedingWorksheet(project);
-                toast({ title: "Breeding worksheet downloaded" });
-              }}
-            >
-              <FileText className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" title="Billing Sheet" onClick={() => navigate(`/project/${project.id}/billing`)}>
-              <ClipboardList className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" title="Edit" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="h-9 w-9" aria-label="More actions">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-50 w-56 bg-popover border border-border shadow-lg">
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2"
+                  onClick={() => {
+                    generateProjectPdf(project, events, bulls);
+                    toast({ title: "Customer schedule downloaded", description: `${project.name} schedule saved.` });
+                  }}
+                >
+                  <FileText className="h-4 w-4" /> Customer schedule PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer gap-2" onClick={openEventsInBrowser}>
+                  <Calendar className="h-4 w-4" /> Open in Google Calendar
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2"
+                  onClick={() => {
+                    const bullsForIcs = bulls.map((b) => ({
+                      bull_name: getBullDisplayName(b),
+                      registration_number: b.bulls_catalog ? b.bulls_catalog.registration_number : "",
+                      units: b.units,
+                    }));
+                    const icsEvents = buildProjectIcsEvents(project, events, bullsForIcs);
+                    const icsContent = generateIcsFile(icsEvents, `${project.name} — BeefSynch`);
+                    const safeName = project.name.replace(/\s+/g, "_");
+                    downloadIcsFile(icsContent, `${safeName}_BeefSynch.ics`);
+                    toast({ title: "Calendar downloaded", description: `${project.name} .ics file saved.` });
+                  }}
+                >
+                  <Download className="h-4 w-4" /> Download .ics
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2"
+                  onClick={() => {
+                    generateProjectCsv(project, events, bulls);
+                    toast({ title: "CSV downloaded", description: `${project.name} CSV saved.` });
+                  }}
+                >
+                  <Download className="h-4 w-4" /> Download CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setEditOpen(true)}>
+                  <Settings className="h-4 w-4" /> Edit project
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2 text-destructive focus:text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 className="h-4 w-4" /> Delete project
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
