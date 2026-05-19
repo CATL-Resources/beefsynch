@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Package, Archive, Dna, Plus, FileText, Droplets, ChevronDown, ChevronRight, Truck, Sun, Mail, Pencil, Trash2, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft, Package, Archive, Dna, Plus, FileText, Droplets, ChevronDown, ChevronRight, Truck, Sun, Mail, Pencil, Trash2, ArrowRightLeft, Search } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 
 import Navbar from "@/components/Navbar";
@@ -180,7 +180,7 @@ const CustomerDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tank_inventory")
-        .select("*, bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, company, registration_number)")
+        .select("*, bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code, company, registration_number)")
         .eq("organization_id", orgId!)
         .eq("customer_id", id!)
         .limit(10000);
@@ -229,7 +229,7 @@ const CustomerDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tank_inventory")
-        .select("*, bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, company, registration_number)")
+        .select("*, bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code, company, registration_number)")
         .in("tank_id", allTankIds)
         .eq("owner_customer_id", id)
         .limit(10000);
@@ -355,10 +355,28 @@ const CustomerDetail = () => {
     return map;
   }, [allTransactions]);
 
+  // Bull search across the customer's tanks. Filters every list that comes
+  // off allInventory below.
+  const [inventorySearch, setInventorySearch] = useState("");
+  const matchesBullSearch = (row: any, q: string) => {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    const haystack = [
+      row.bulls_catalog?.bull_name,
+      row.bulls_catalog?.naab_code,
+      row.bull_code,
+      row.custom_bull_name,
+    ]
+      .filter(Boolean)
+      .map((v: string) => v.toLowerCase());
+    return haystack.some((s) => s.includes(needle));
+  };
+
   // Group inventory by tank
   const inventoryByTank = useMemo(() => {
     const map = new Map<string, any[]>();
     for (const inv of allInventory) {
+      if (!matchesBullSearch(inv, inventorySearch)) continue;
       const arr = map.get(inv.tank_id) || [];
       arr.push(inv);
       map.set(inv.tank_id, arr);
@@ -371,7 +389,7 @@ const CustomerDetail = () => {
       });
     }
     return map;
-  }, [allInventory]);
+  }, [allInventory, inventorySearch]);
 
   // Stats
   const totalTanks = allTanks.length;
@@ -822,6 +840,20 @@ const CustomerDetail = () => {
               </Button>
             </div>
             <CollapsibleContent className="space-y-3">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder={`Search bulls in ${customer.name}'s inventory...`}
+                  value={inventorySearch}
+                  onChange={(e) => setInventorySearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              {inventorySearch && Array.from(inventoryByTank.values()).every((rows) => rows.length === 0) && (
+                <p className="text-sm text-muted-foreground italic">
+                  No bulls matching "{inventorySearch}" in {customer.name}'s inventory.
+                </p>
+              )}
               {
           allTanks.map((tank: any) => {
             const inv = inventoryByTank.get(tank.id) || [];
