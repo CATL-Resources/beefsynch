@@ -11,6 +11,7 @@ import AppFooter from "@/components/AppFooter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -47,6 +48,7 @@ const ProjectBilling = () => {
   const [billingId, setBillingId] = useState<string | null>(null);
   const [billingRecord, setBillingRecord] = useState<any>(null);
   const [projectPacks, setProjectPacks] = useState<any[]>([]);
+  const [packLines, setPackLines] = useState<any[]>([]);
   const [finalizing, setFinalizing] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [productLines, setProductLines] = useState<ProductLine[]>([]);
@@ -123,10 +125,22 @@ const ProjectBilling = () => {
 
     const { data: packLinks } = await supabase
       .from("tank_pack_projects")
-      .select("tank_pack_id, tank_packs(id, status, pack_type, field_tank_id, tanks:field_tank_id(id, tank_number, tank_name))")
+      .select("tank_pack_id, tank_packs(id, status, pack_type, field_tank_id, packed_at, packed_by, tanks:field_tank_id(id, tank_number, tank_name))")
       .eq("project_id", projectId!);
     const packs = (packLinks ?? []).map((pl: any) => pl.tank_packs).filter(Boolean);
     setProjectPacks(packs);
+
+    // Load pack lines for the packed-contents table
+    const firstPackId = packs[0]?.id;
+    if (firstPackId) {
+      const { data: lines } = await supabase
+        .from("tank_pack_lines")
+        .select("id, bull_catalog_id, bull_name, bull_code, field_canister, units, source_tank_id, source_canister, bulls_catalog(bull_name, naab_code)")
+        .eq("tank_pack_id", firstPackId);
+      setPackLines((lines as any[]) ?? []);
+    } else {
+      setPackLines([]);
+    }
 
     // Auto-generate semen worksheet if pack exists + breeding sessions + no inventory rows yet
     if (existingBilling && packs.length > 0) {
@@ -1191,6 +1205,68 @@ const ProjectBilling = () => {
             </div>
           </div>
         )}
+
+        {hasPack && firstPack && packLines.length > 0 && (() => {
+          const fieldTankLabel = firstPack.tanks?.tank_name
+            ? `${firstPack.tanks.tank_name} (#${firstPack.tanks.tank_number})`
+            : firstPack.tanks?.tank_number
+              ? `Tank #${firstPack.tanks.tank_number}`
+              : "Field tank";
+          // Roll up by bull + field canister; split pulls collapse into one row
+          const rollupMap = new Map<string, { bullName: string; naabCode: string | null; fieldCanister: string; units: number }>();
+          for (const line of packLines) {
+            const bullName = line.bulls_catalog?.bull_name || line.bull_name || "(unknown)";
+            const naabCode = line.bulls_catalog?.naab_code || line.bull_code || null;
+            const fieldCanister = line.field_canister || "1";
+            const key = `${line.bull_catalog_id || line.bull_name}_${fieldCanister}`;
+            const existing = rollupMap.get(key);
+            if (existing) {
+              existing.units += line.units || 0;
+            } else {
+              rollupMap.set(key, { bullName, naabCode, fieldCanister, units: line.units || 0 });
+            }
+          }
+          const rows = Array.from(rollupMap.values()).sort((a, b) => a.fieldCanister.localeCompare(b.fieldCanister, undefined, { numeric: true }));
+          const totalUnits = rows.reduce((s, r) => s + r.units, 0);
+          return (
+            <section className="space-y-2">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Package className="h-4 w-4 text-muted-foreground" />
+                Packed → {fieldTankLabel}
+                <span className="text-xs font-normal text-muted-foreground">· {totalUnits} units</span>
+              </h2>
+              <div className="rounded-lg border border-border/50 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30">
+                      <TableHead>Bull</TableHead>
+                      <TableHead>NAAB</TableHead>
+                      <TableHead>Field can</TableHead>
+                      <TableHead className="text-right">Units</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((r, i) => (
+                      <TableRow key={`${r.bullName}-${r.fieldCanister}-${i}`}>
+                        <TableCell className="font-medium">{r.bullName}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.naabCode ?? "—"}</TableCell>
+                        <TableCell className="text-sm">{r.fieldCanister}</TableCell>
+                        <TableCell className="text-right font-medium">{r.units}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {(firstPack.packed_at || firstPack.packed_by) && (
+                <p className="text-[12px] text-muted-foreground">
+                  Packed
+                  {firstPack.packed_at && <> {format(parseISO(firstPack.packed_at), "MMM d, yyyy")}</>}
+                  {firstPack.packed_by && <> by {firstPack.packed_by}</>}
+                </p>
+              )}
+            </section>
+          );
+        })()}
 
         {!hasPack && (
           <p className="text-xs text-muted-foreground italic">Sessions will appear after packing</p>
