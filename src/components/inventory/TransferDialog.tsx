@@ -238,7 +238,7 @@ export default function TransferDialog({
     }
     if (mode === "order") {
       if (!customerId) return "Customer is required";
-      if (!orderId) return "Order is required";
+      // orderId is optional — if missing, withdraw_inventory auto-creates one
     }
     if (mode === "pickup") {
       if (!customerId) return "Customer is required for pickup";
@@ -281,23 +281,41 @@ export default function TransferDialog({
         const deliveryLabel =
           DELIVERY_METHODS.find((d) => d.value === deliveryMethod)?.label || deliveryMethod;
         const noteParts = [deliveryLabel, note.trim()].filter(Boolean);
-        const { error } = await supabase.rpc("record_direct_sale", {
-          _input: {
-            order_id: orderId,
-            source_tank_id: effectiveTankId,
-            source_canister: sourceRow.canister || null,
-            bull_catalog_id: sourceRow.bull_catalog_id || null,
-            bull_code: bullCode || null,
-            bull_name: bullName || null,
-            units,
-            is_billable: true,
-            notes: noteParts.join(" — "),
-          },
-        });
-        if (error) throw error;
+
+        if (orderId) {
+          // Fulfilling against an existing order
+          const { error } = await supabase.rpc("record_direct_sale", {
+            _input: {
+              order_id: orderId,
+              source_tank_id: effectiveTankId,
+              source_canister: sourceRow.canister || null,
+              bull_catalog_id: sourceRow.bull_catalog_id || null,
+              bull_code: bullCode || null,
+              bull_name: bullName || null,
+              units,
+              is_billable: true,
+              destination_tank_id: destTankId || null,
+              notes: noteParts.join(" — "),
+            },
+          });
+          if (error) throw error;
+        } else {
+          // No order selected — withdraw_inventory auto-creates a customer order
+          const { error } = await supabase.rpc("withdraw_inventory", {
+            _source_inventory_id: sourceRow.id,
+            _units: units,
+            _reason: noteParts.join(" — ") || `Direct sale to ${selectedCustomer?.name || "customer"}`,
+            _customer_id: customerId,
+            _order_id: null,
+            _is_billable: true,
+            _performed_by: userId,
+          });
+          if (error) throw error;
+        }
+
         toast({
           title: "Sale recorded",
-          description: `${units} units of ${bullName} recorded against order`,
+          description: `${units} units of ${bullName} sold to ${selectedCustomer?.name || "customer"}${orderId ? " (existing order)" : " (new order created)"}`,
         });
       } else if (mode === "pickup") {
         const { error } = await supabase.rpc("customer_pickup", {
@@ -364,7 +382,7 @@ export default function TransferDialog({
           : "Withdraw";
 
   const orderEmpty = mode === "order" && !!customerId && orders.length === 0;
-  const submitDisabled = submitting || orderEmpty;
+  const submitDisabled = submitting;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -604,7 +622,7 @@ export default function TransferDialog({
 
                 {(mode === "order" || (customerId && mode !== "pickup")) && (
                   <div>
-                    <Label>{mode === "order" ? "Order *" : "Link to order"}</Label>
+                    <Label>{mode === "order" ? "Order (optional)" : "Link to order"}</Label>
                     <Popover open={orderPopoverOpen} onOpenChange={setOrderPopoverOpen}>
                       <PopoverTrigger asChild>
                         <Button
@@ -668,10 +686,64 @@ export default function TransferDialog({
                       </PopoverContent>
                     </Popover>
                     {orderEmpty && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                        No open orders for this customer — create one from the Orders page first.
+                      <p className="text-xs text-muted-foreground mt-1">
+                        No open orders — a new order will be created automatically.
                       </p>
                     )}
+                  </div>
+                )}
+
+                {mode === "order" && customerId && (
+                  <div>
+                    <Label>Destination tank (optional)</Label>
+                    <Popover open={tankPopoverOpen} onOpenChange={setTankPopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className="w-full justify-between font-normal"
+                        >
+                          {selectedTank ? tankLabel(selectedTank) : "No tank — semen leaves inventory"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                        <Command filter={(value, search) => value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
+                          <CommandInput placeholder="Search tanks…" />
+                          <CommandList>
+                            <CommandEmpty>No tanks found.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="__none__"
+                                onSelect={() => {
+                                  setDestTankId("");
+                                  setTankPopoverOpen(false);
+                                }}
+                              >
+                                <Check className={cn("mr-2 h-4 w-4", !destTankId ? "opacity-100" : "opacity-0")} />
+                                No tank — semen leaves inventory
+                              </CommandItem>
+                              {destTanks.map((t) => (
+                                <CommandItem
+                                  key={t.id}
+                                  value={tankLabel(t)}
+                                  onSelect={() => {
+                                    setDestTankId(t.id);
+                                    setTankPopoverOpen(false);
+                                  }}
+                                >
+                                  <Check className={cn("mr-2 h-4 w-4", destTankId === t.id ? "opacity-100" : "opacity-0")} />
+                                  {tankLabel(t)}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Pick the customer's tank if you want to track where this semen went.
+                    </p>
                   </div>
                 )}
               </div>

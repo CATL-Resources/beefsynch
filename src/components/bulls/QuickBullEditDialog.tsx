@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import BreedSelect from "@/components/bulls/BreedSelect";
 import {
   Dialog,
   DialogContent,
@@ -104,7 +105,7 @@ export default function QuickBullEditDialog({
             <Label className="text-right">Reg #</Label>
             <Input value={regNumber} onChange={(e) => setRegNumber(e.target.value)} placeholder="Registration number" />
             <Label className="text-right">Breed</Label>
-            <Input value={breed} onChange={(e) => setBreed(e.target.value)} placeholder="e.g. Angus" />
+            <BreedSelect value={breed} onChange={setBreed} placeholder="Select breed (optional)" />
           </div>
         )}
         <DialogFooter>

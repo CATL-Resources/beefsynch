@@ -5,10 +5,11 @@ import { ArrowLeft, Calendar, FileDown, FileText, Download, Pencil, MoreVertical
 import { Textarea } from "@/components/ui/textarea";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import NewProjectDialog from "@/components/NewProjectDialog";
+import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import CustomerPicker from "@/components/CustomerPicker";
 import { generateProjectPdf } from "@/lib/generateProjectPdf";
 import { generateProjectCsv } from "@/lib/generateProjectCsv";
-import { generateWorksheetPdf } from "@/lib/generateWorksheetPdf";
+import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import { buildProjectIcsEvents, generateIcsFile, downloadIcsFile } from "@/lib/generateIcs";
 import {
@@ -101,6 +102,7 @@ interface BullRow {
   units: number;
   custom_bull_name: string | null;
   bull_catalog_id: string | null;
+  semen_source: "company" | "customer";
   bulls_catalog: { bull_name: string; company: string; registration_number: string; breed: string } | null;
 }
 
@@ -114,6 +116,7 @@ const ProjectDetail = () => {
   const [bulls, setBulls] = useState<BullRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
+  const [editBullId, setEditBullId] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Contact history state
@@ -135,6 +138,8 @@ const ProjectDetail = () => {
   const [orgGoogleCalendarId, setOrgGoogleCalendarId] = useState<string | null>(null);
   const [googleCalendarConfigured, setGoogleCalendarConfigured] = useState(isGoogleCalendarConfigured());
   const [customerEditOpen, setCustomerEditOpen] = useState(false);
+  const [activePacks, setActivePacks] = useState<{ pack_id: string; status: string; tank_name: string | null; tank_number: string | number }[]>([]);
+  const [hasActiveBilling, setHasActiveBilling] = useState(false);
 
   // Fetch org members for the contact dropdown
   const fetchOrgMembers = useCallback(async () => {
@@ -273,7 +278,7 @@ const ProjectDetail = () => {
   const load = async () => {
     if (!id) return;
     try {
-      const [pRes, eRes, bRes] = await Promise.all([
+      const [pRes, eRes, bRes, packRes, billRes] = await Promise.all([
         supabase.from("projects").select("*, customers!projects_customer_id_fkey(name)").eq("id", id).single(),
         supabase
           .from("protocol_events")
@@ -284,11 +289,35 @@ const ProjectDetail = () => {
           .from("project_bulls")
           .select("*, bulls_catalog(bull_name, company, registration_number, breed)")
           .eq("project_id", id),
+        supabase
+          .from("tank_pack_projects")
+          .select("tank_pack_id, tank_packs!inner(id, status, tanks!tank_packs_field_tank_id_fkey(tank_name, tank_number))")
+          .eq("project_id", id),
+        supabase
+          .from("project_billing_semen")
+          .select("units_packed, units_blown, units_billable")
+          .eq("project_id", id),
       ]);
 
       if (pRes.data) setProject(pRes.data as unknown as ProjectRow);
       if (eRes.data) setEvents(eRes.data as EventRow[]);
       if (bRes.data) setBulls(bRes.data as BullRow[]);
+
+      const packs = ((packRes.data ?? []) as any[])
+        .map((row) => row.tank_packs)
+        .filter((tp: any) => tp && !["cancelled", "unpacked", "tank_returned"].includes(tp.status))
+        .map((tp: any) => ({
+          pack_id: tp.id,
+          status: tp.status,
+          tank_name: tp.tanks?.tank_name ?? null,
+          tank_number: tp.tanks?.tank_number ?? "",
+        }));
+      setActivePacks(packs);
+
+      const billActive = ((billRes.data ?? []) as any[]).some(
+        (r) => (r.units_packed ?? 0) > 0 || (r.units_blown ?? 0) > 0 || (r.units_billable ?? 0) > 0,
+      );
+      setHasActiveBilling(billActive);
     } catch (err) {
       toast({ title: "Error", description: "Failed to load project details", variant: "destructive" });
     } finally {
@@ -312,6 +341,20 @@ const ProjectDetail = () => {
       setLastSyncedAt(null);
     }
   }, [id, userId]);
+
+  const toggleSemenSource = async (b: BullRow) => {
+    const next = b.semen_source === "customer" ? "company" : "customer";
+    setBulls((prev) => prev.map((row) => row.id === b.id ? { ...row, semen_source: next } : row));
+    const { error } = await supabase
+      .from("project_bulls")
+      .update({ semen_source: next })
+      .eq("id", b.id);
+    if (error) {
+      // Roll back UI change on failure
+      setBulls((prev) => prev.map((row) => row.id === b.id ? { ...row, semen_source: b.semen_source } : row));
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
 
   const handleChangeCustomer = async (newCustomerId: string | null) => {
     if (!newCustomerId || !project) return;
@@ -688,39 +731,34 @@ const ProjectDetail = () => {
             >
               <FileDown className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" title="Pack Tank" onClick={() => navigate(`/pack-tank?projectId=${project.id}`)}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9"
+              title="Pack Tank"
+              onClick={() => {
+                if (activePacks.length > 0) {
+                  const labels = activePacks
+                    .map((p) => (p.tank_name ? `${p.tank_name} #${p.tank_number}` : `#${p.tank_number}`))
+                    .join(", ");
+                  if (!window.confirm(`This project already has a tank packed (${labels}). Pack another?`)) {
+                    return;
+                  }
+                }
+                navigate(`/pack-tank?projectId=${project.id}`);
+              }}
+            >
               <Package className="h-4 w-4" />
             </Button>
             <Button
               variant="outline"
               size="icon"
               className="h-9 w-9"
-              title="Print Worksheet"
+              title="Breeding Worksheet"
               onClick={async () => {
                 if (!project) return;
-                const billingRes = await supabase
-                  .from("project_billing")
-                  .select("id")
-                  .eq("project_id", project.id)
-                  .maybeSingle();
-                let products: any[] = [];
-                if (billingRes.data?.id) {
-                  const { data } = await supabase
-                    .from("project_billing_products")
-                    .select("*")
-                    .eq("billing_id", billingRes.data.id)
-                    .order("sort_order");
-                  products = data ?? [];
-                }
-                const { data: packLinks } = await supabase
-                  .from("tank_pack_projects")
-                  .select("tank_packs(id, status, pack_type, field_tank_id, tanks:field_tank_id(id, tank_number, tank_name))")
-                  .eq("project_id", project.id);
-                const firstPack = (packLinks ?? [])
-                  .map((pl: any) => pl.tank_packs)
-                  .find(Boolean) || null;
-                generateWorksheetPdf(project, events, bulls, products, firstPack);
-                toast({ title: "Worksheet downloaded" });
+                await printBreedingWorksheet(project);
+                toast({ title: "Breeding worksheet downloaded" });
               }}
             >
               <FileText className="h-4 w-4" />
@@ -794,6 +832,34 @@ const ProjectDetail = () => {
               {breedingTimeDisplay && ` at ${breedingTimeDisplay}`}
             </span>
           </div>
+          {(activePacks.length > 0 || hasActiveBilling) && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {activePacks.map((p) => (
+                <button
+                  key={p.pack_id}
+                  type="button"
+                  onClick={() => navigate(`/pack/${p.pack_id}`)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+                >
+                  <Package className="h-3.5 w-3.5" />
+                  Packed in: {p.tank_name ? `${p.tank_name} (#${p.tank_number})` : `#${p.tank_number}`}
+                  <Badge variant="outline" className="ml-1 capitalize text-[10px] h-4">
+                    {p.status.replace(/_/g, " ")}
+                  </Badge>
+                </button>
+              ))}
+              {hasActiveBilling && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/project/${project.id}/billing`)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border border-blue-500/30 bg-blue-500/15 text-blue-700 dark:text-blue-300 hover:bg-blue-500/25 transition-colors"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  Billing active
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Contact History */}
@@ -1080,6 +1146,7 @@ const ProjectDetail = () => {
                   <TableRow>
                     <TableHead className="w-8"></TableHead>
                     <TableHead>Bull Name</TableHead>
+                    <TableHead>Source</TableHead>
                     <TableHead className="text-right">Units</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1118,11 +1185,34 @@ const ProjectDetail = () => {
                               return bullDisplay;
                             })()
                           : b.custom_bull_name ?? "Unknown"}
+                        {b.bull_catalog_id && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditBullId(b.bull_catalog_id); }}
+                            className="ml-1.5 inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                            title="Edit bull info"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        )}
                         {b.bulls_catalog?.registration_number && (
                           <div className="mt-0.5">
                             <ClickableRegNumber registrationNumber={b.bulls_catalog.registration_number} breed={b.bulls_catalog.breed} />
                           </div>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => toggleSemenSource(b)}
+                          className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 border transition-colors ${
+                            b.semen_source === "customer"
+                              ? "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20"
+                              : "border-blue-500/40 bg-blue-500/10 text-blue-700 hover:bg-blue-500/20"
+                          }`}
+                          title="Click to toggle who provides the semen"
+                        >
+                          {b.semen_source === "customer" ? "Customer supplied" : "CATL provides"}
+                        </button>
                       </TableCell>
                       <TableCell className="text-right">{b.units}</TableCell>
                     </TableRow>
@@ -1169,9 +1259,18 @@ const ProjectDetail = () => {
             name: b.bulls_catalog ? b.bulls_catalog.bull_name : b.custom_bull_name ?? "",
             catalogId: b.bull_catalog_id,
             units: b.units,
+            semenSource: b.semen_source,
           })),
         } : null}
       />
+
+      {editBullId && (
+        <QuickBullEditDialog
+          open={!!editBullId}
+          onOpenChange={(open) => { if (!open) setEditBullId(null); }}
+          bullCatalogId={editBullId}
+        />
+      )}
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

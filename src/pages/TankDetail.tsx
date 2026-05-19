@@ -7,7 +7,7 @@ import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ExportMenu } from "@/components/ExportMenu";
 import { ExportConfig } from "@/lib/exports";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { Plus, Loader2 } from "lucide-react";
 
 import { format, parseISO, differenceInDays } from "date-fns";
@@ -1111,7 +1111,7 @@ const TankDetail = () => {
                 {transactions.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No transactions recorded</TableCell></TableRow>
                 ) : transactions.map((t: any) => {
-                  const bullName = getBullDisplayName(t);
+                  const bullName = getBullDisplayLabel(t);
                   const projOrder = t.projects?.name || t.semen_orders?.customers?.name || "—";
                   return (
                     <TableRow key={t.id}>

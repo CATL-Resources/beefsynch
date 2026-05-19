@@ -241,7 +241,7 @@ export function generateCustomerInventoryPdf(
         .join(", ");
       const totalBilled = billable.reduce((s, b) => s + (b.units || 0), 0);
       return [
-        format(parseISO(o.order_date), "MMM d, yyyy"),
+        o.order_date ? format(parseISO(o.order_date), "MMM d, yyyy") : "—",
         o.semen_companies?.name || "—",
         bulls || "—",
         String(totalBilled),

@@ -45,6 +45,7 @@ interface PlanningRow {
   incoming: number;
   customer_orders: number;
   project_needs: number;
+  customer_project_needs: number;
   net_position: number;
   needed_by: string | null;
   active_projects: number;

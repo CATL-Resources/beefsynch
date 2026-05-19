@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { toast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Printer, ClipboardList, Check, Package, PackageOpen, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Printer, ClipboardList, Check, Package, PackageOpen, Trash2, Plus, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
@@ -12,9 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { generateBillingSheetPdf } from "@/lib/generateBillingSheetPdf";
-import { generateWorksheetPdf } from "@/lib/generateWorksheetPdf";
+import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import BillingTab from "@/components/billing/BillingTab";
+import NewProjectDialog from "@/components/NewProjectDialog";
 
 import {
   BillingProduct, ProductLine, SessionLine, SessionInventoryLine, SemenLine, LaborLine,
@@ -45,6 +46,7 @@ const ProjectBilling = () => {
   const [semenLines, setSemenLines] = useState<SemenLine[]>([]);
   const [laborLines, setLaborLines] = useState<LaborLine[]>([]);
 
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -794,6 +796,47 @@ const ProjectBilling = () => {
     saveSemenLine(idx, { invoiced: nowInvoiced, invoiced_at: nowInvoiced ? new Date().toISOString() : null });
   }
 
+  async function markBillingInvoiced() {
+    if (!billingId) return;
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("project_billing")
+      .update({ status: "invoiced_closed", billing_completed_at: now })
+      .eq("id", billingId);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    setBillingRecord((prev: any) => ({ ...prev, status: "invoiced_closed", billing_completed_at: now }));
+    setProject((prev: any) => prev ? { ...prev, status: "Invoiced" } : prev);
+    toast({ title: "Marked invoiced & closed" });
+  }
+
+  async function revertBillingInvoiced() {
+    if (!billingId || !projectId) return;
+    if (!window.confirm("Are you sure? This will move the project back to Work Complete and reopen the billing.")) return;
+    const { error: bErr } = await supabase
+      .from("project_billing")
+      .update({ status: "work_complete", billing_completed_at: null })
+      .eq("id", billingId);
+    if (bErr) {
+      toast({ title: "Error", description: bErr.message, variant: "destructive" });
+      return;
+    }
+    // The trigger guards against rolling project status back from Invoiced, so do it manually.
+    const { error: pErr } = await supabase
+      .from("projects")
+      .update({ status: "Work Complete" })
+      .eq("id", projectId);
+    if (pErr) {
+      toast({ title: "Error", description: pErr.message, variant: "destructive" });
+      return;
+    }
+    setBillingRecord((prev: any) => ({ ...prev, status: "work_complete", billing_completed_at: null }));
+    setProject((prev: any) => prev ? { ...prev, status: "Work Complete" } : prev);
+    toast({ title: "Reverted to Work Complete" });
+  }
+
   async function closeOutProject() {
     if (!billingId) return;
     const now = new Date().toISOString();
@@ -867,11 +910,10 @@ const ProjectBilling = () => {
     toast({ title: "PDF downloaded" });
   }
 
-  function handlePrintWorksheet() {
+  async function handlePrintWorksheet() {
     if (!project) return;
-    const firstPack = projectPacks[0] || null;
-    generateWorksheetPdf(project, events, projectBulls, productLines, firstPack);
-    toast({ title: "Worksheet downloaded" });
+    await printBreedingWorksheet(project);
+    toast({ title: "Breeding worksheet downloaded" });
   }
 
   /* ── Auto-update AI Service qty + semen line used values from breeding ── */
@@ -992,7 +1034,20 @@ const ProjectBilling = () => {
             <span className={`px-3 py-1.5 rounded-full text-xs font-medium ${STATUS_COLORS[currentStatus] || "bg-muted text-muted-foreground"}`}>
               {STATUS_LABELS[currentStatus] || currentStatus}
             </span>
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrintWorksheet} title="Print Worksheet">
+            {currentStatus === "work_complete" && (
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={markBillingInvoiced}>
+                Mark Invoiced
+              </Button>
+            )}
+            {currentStatus === "invoiced_closed" && (
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={revertBillingInvoiced}>
+                Revert to Work Complete
+              </Button>
+            )}
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setEditProjectOpen(true)} title="Edit Project">
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrintWorksheet} title="Breeding Worksheet">
               <ClipboardList className="h-4 w-4" />
             </Button>
             <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrint} title="Print PDF">
@@ -1167,6 +1222,31 @@ const ProjectBilling = () => {
           </div>
         </div>
       )}
+      <NewProjectDialog
+        open={editProjectOpen}
+        onOpenChange={setEditProjectOpen}
+        onProjectCreated={() => loadData()}
+        editData={project ? {
+          id: project.id,
+          name: project.name,
+          customer_id: (project as any).customer_id,
+          cattle_type: project.cattle_type,
+          protocol: project.protocol,
+          head_count: project.head_count,
+          breeding_date: project.breeding_date,
+          breeding_time: project.breeding_time,
+          status: project.status,
+          notes: project.notes,
+          last_contacted_date: project.last_contacted_date,
+          last_contacted_by: project.last_contacted_by,
+          bulls: projectBulls.map((b: any) => ({
+            name: b.bulls_catalog ? b.bulls_catalog.bull_name : b.custom_bull_name ?? "",
+            catalogId: b.bull_catalog_id,
+            units: b.units,
+            semenSource: b.semen_source,
+          })),
+        } : null}
+      />
       <AppFooter />
     </div>
   );

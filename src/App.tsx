@@ -19,6 +19,8 @@ const BullList = lazy(() => import("./pages/BullList"));
 
 const BullChat = lazy(() => import("./pages/BullChat"));
 const SemenOrderDetail = lazy(() => import("./pages/SemenOrderDetail"));
+const FulfillOrder = lazy(() => import("./pages/FulfillOrder"));
+const Billable = lazy(() => import("./pages/Billable"));
 const Customers = lazy(() => import("./pages/Customers"));
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const Companies = lazy(() => import("./pages/Companies"));
@@ -103,16 +105,18 @@ const App = () => (
                 <Route path="/calendar" element={<ProtectedRoute><MasterCalendar /></ProtectedRoute>} />
                 <Route path="/bulls" element={<ProtectedRoute><BullList /></ProtectedRoute>} />
                 <Route path="/semen-orders/:id" element={<ProtectedRoute><SemenOrderDetail /></ProtectedRoute>} />
+                <Route path="/semen-orders/:id/fulfill" element={<ProtectedRoute><FulfillOrder /></ProtectedRoute>} />
+                <Route path="/billable" element={<ProtectedRoute><Billable /></ProtectedRoute>} />
                 <Route path="/bull-report" element={<Navigate to="/operations?tab=inventory" replace />} />
                 <Route path="/chat" element={<ProtectedRoute><BullChat /></ProtectedRoute>} />
                 <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
                 <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
                 <Route path="/companies" element={<ProtectedRoute><Companies /></ProtectedRoute>} />
-                <Route path="/tanks" element={<Navigate to="/operations?tab=inventory" replace />} />
+                <Route path="/tanks" element={<Navigate to="/operations?tab=tanks" replace />} />
                 <Route path="/tanks/:id" element={<ProtectedRoute><TankDetail /></ProtectedRoute>} />
                 <Route path="/tanks/:tankId/reinventory" element={<ProtectedRoute><ReInventory /></ProtectedRoute>} />
-                <Route path="/tank-fills" element={<Navigate to="/operations?tab=inventory" replace />} />
-                <Route path="/tanks-out" element={<Navigate to="/operations?tab=inventory" replace />} />
+                <Route path="/tank-fills" element={<Navigate to="/operations?tab=tanks" replace />} />
+                <Route path="/tanks-out" element={<Navigate to="/operations?tab=tanks" replace />} />
                 <Route path="/semen-inventory" element={<Navigate to="/operations?tab=inventory" replace />} />
                 <Route path="/receive-shipment" element={<ProtectedRoute><ReceiveShipment /></ProtectedRoute>} />
                 <Route path="/receive-shipment/preview/:id" element={<ProtectedRoute><ReceiveShipmentPreview /></ProtectedRoute>} />
@@ -128,7 +132,7 @@ const App = () => (
                 <Route path="/dashboard" element={<Navigate to="/operations?tab=projects" replace />} />
                 <Route path="/inventory-hub" element={<Navigate to="/operations" replace />} />
                 <Route path="/inventory-dashboard" element={<Navigate to="/operations?tab=inventory" replace />} />
-                <Route path="/tanks-dashboard" element={<Navigate to="/operations?tab=inventory" replace />} />
+                <Route path="/tanks-dashboard" element={<Navigate to="/operations?tab=tanks" replace />} />
                 <Route path="/packs" element={<Navigate to="/operations?tab=projects" replace />} />
                 <Route path="/unpacks" element={<Navigate to="/operations?tab=projects" replace />} />
                 <Route path="/shipments" element={<Navigate to="/operations?tab=orders" replace />} />

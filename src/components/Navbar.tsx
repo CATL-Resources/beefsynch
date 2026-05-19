@@ -56,7 +56,7 @@ const Navbar = ({ onNewProject }: NavbarProps) => {
     <header className="border-b border-border/50 backdrop-blur-sm">
       <div className="container mx-auto flex items-center justify-between px-4 py-4">
         {/* Logo */}
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate("/operations?tab=projects")}>
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate("/operations?tab=hub")}>
           <img src={beefsynchIcon} alt="BeefSynch logo" className="h-9 w-9 object-contain rounded" />
           <div>
             <h1 className="text-2xl font-bold font-display text-foreground tracking-tight">

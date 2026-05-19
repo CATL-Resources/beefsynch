@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   Search, Archive, Users, Building2, Dna, FileText, FileSpreadsheet, ArrowUpDown,
-  Truck, ChevronDown, ChevronUp, MoreHorizontal, Pencil,
+  Truck, ChevronDown, ChevronUp, MoreHorizontal, Pencil, ClipboardList, Package,
+  ArrowUpRight, ArrowDownLeft,
 } from "lucide-react";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 
@@ -52,7 +53,7 @@ const STORAGE_BADGES: Record<string, string> = {
   inventory: "bg-purple-500/15 text-purple-400 border-purple-500/30",
 };
 
-type SortKey = "bull_name" | "customer" | "tank" | "units";
+type SortKey = "bull_name" | "breed" | "customer" | "tank" | "units";
 type SortDir = "asc" | "desc";
 
 interface InventoryTabProps {
@@ -70,6 +71,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
   const [search, setSearch] = useState("");
   const [storageFilter, setStorageFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState<string>(initialOwnerFilter);
+  const [breedFilter, setBreedFilter] = useState<string>("all");
   // "available" = company-owned, sellable; "all" = every shelf row including customer-owned.
   // Default to "available" so the dashboard shows what's actually for sale by default.
   const [shelfMode, setShelfMode] = useState<"available" | "all">("available");
@@ -116,7 +118,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       while (true) {
         const { data, error } = await supabase
           .from("tank_inventory")
-          .select("*, customers!tank_inventory_customer_id_fkey(name), tanks!tank_inventory_tank_id_fkey(tank_name, tank_number), bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code)")
+          .select("*, customers!tank_inventory_customer_id_fkey(name), tanks!tank_inventory_tank_id_fkey(tank_name, tank_number), bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code, breed)")
           .eq("organization_id", orgId!)
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -144,6 +146,19 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     },
   });
 
+  const { data: breedOptions = [] } = useQuery({
+    queryKey: ["breeds"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("breeds")
+        .select("name, sort_order")
+        .eq("is_active", true)
+        .order("sort_order");
+      return (data ?? []) as { name: string; sort_order: number }[];
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+
   const { data: customerOptions = [] } = useQuery({
     queryKey: ["customers_for_edit", orgId],
     enabled: !!orgId,
@@ -166,6 +181,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     bullCatalogId: item.bull_catalog_id || null,
     _raw: item,
     bullCode: item.bull_code || "—",
+    breed: item.bulls_catalog?.breed || "",
     customer: item.customers?.name || (item.customer_id ? "Unknown" : "Company"),
     customerId: item.customer_id,
     tankId: item.tank_id,
@@ -180,12 +196,125 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     inventoriedAt: item.inventoried_at,
   })), [inventory]);
 
+  // Active project + order counts per catalog bull. We fetch *all* org rows
+  // rather than passing distinct bull_catalog_ids in an .in() clause —
+  // PostgREST's URL length cap can't take ~1k UUIDs and the request fails
+  // silently. RLS + the org-scoped projects/orders embeds keep the result
+  // size sane.
+  // Three-category activity summary per catalog bull:
+  //  - customerOrders: outbound (order_type=customer)
+  //  - inventoryOrders: inbound POs (order_type=inventory) — "incoming"
+  //  - projects: bulls allocated to active synchronization projects
+  type Activity = {
+    customerOrders: Record<string, { count: number; units: number; headCount: number }>;
+    inventoryOrders: Record<string, { count: number; unitsPending: number }>;
+    projects: Record<string, { count: number; headCount: number; units: number }>;
+  };
+  const { data: bullActivity = {
+    customerOrders: {},
+    inventoryOrders: {},
+    projects: {},
+  } as Activity } = useQuery<Activity>({
+    queryKey: ["inventory_bull_activity_v2", orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const customerOrders: Activity["customerOrders"] = {};
+      const inventoryOrders: Activity["inventoryOrders"] = {};
+      const projects: Activity["projects"] = {};
+      const [projRes, ordRes] = await Promise.all([
+        supabase
+          .from("project_bulls")
+          .select("bull_catalog_id, units, projects!inner(status, head_count, organization_id)")
+          .eq("projects.organization_id", orgId!)
+          .not("bull_catalog_id", "is", null),
+        supabase
+          .from("semen_order_items")
+          .select("bull_catalog_id, units, units_received, item_status, semen_orders!inner(order_type, fulfillment_status, organization_id)")
+          .eq("semen_orders.organization_id", orgId!)
+          .not("bull_catalog_id", "is", null),
+      ]);
+
+      for (const r of (projRes.data ?? []) as any[]) {
+        const status = r.projects?.status;
+        if (status === "Work Complete" || status === "Invoiced") continue;
+        const k = r.bull_catalog_id as string;
+        const cur = projects[k] ?? { count: 0, headCount: 0, units: 0 };
+        cur.count += 1;
+        cur.headCount += r.projects?.head_count ?? 0;
+        cur.units += r.units ?? 0;
+        projects[k] = cur;
+      }
+
+      const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
+      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered"]);
+      for (const r of (ordRes.data ?? []) as any[]) {
+        if (TERMINAL_ITEM.has(r.item_status)) continue;
+        const fs = r.semen_orders?.fulfillment_status;
+        if (TERMINAL_ORDER.has(fs)) continue;
+        const k = r.bull_catalog_id as string;
+        const orderType = r.semen_orders?.order_type;
+        if (orderType === "customer") {
+          const cur = customerOrders[k] ?? { count: 0, units: 0, headCount: 0 };
+          cur.count += 1;
+          cur.units += r.units ?? 0;
+          customerOrders[k] = cur;
+        } else if (orderType === "inventory") {
+          const cur = inventoryOrders[k] ?? { count: 0, unitsPending: 0 };
+          cur.count += 1;
+          cur.unitsPending += Math.max(0, (r.units ?? 0) - (r.units_received ?? 0));
+          inventoryOrders[k] = cur;
+        }
+      }
+
+      return { customerOrders, inventoryOrders, projects };
+    },
+  });
+
+  // expandedRow: `${rowId}:projects` | `${rowId}:orders` | null
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const expandedBullCatalogId = useMemo(() => {
+    if (!expandedRow) return null;
+    const [rowId] = expandedRow.split(":");
+    return rows.find((r: any) => r.id === rowId)?.bullCatalogId ?? null;
+  }, [expandedRow, rows]);
+
+  const { data: bullDetail } = useQuery({
+    queryKey: ["inventory_bull_detail", expandedBullCatalogId],
+    enabled: !!expandedBullCatalogId,
+    queryFn: async () => {
+      const id = expandedBullCatalogId!;
+      const [projRes, ordRes] = await Promise.all([
+        supabase
+          .from("project_bulls")
+          .select("units, projects!inner(id, name, protocol, head_count, breeding_date, status, customers!projects_customer_id_fkey(name))")
+          .eq("bull_catalog_id", id),
+        supabase
+          .from("semen_order_items")
+          .select("units, units_received, item_status, semen_orders!inner(id, order_type, order_date, fulfillment_status, placed_by, semen_company_id, customers!semen_orders_customer_id_fkey(name), semen_companies!semen_orders_semen_company_id_fkey(name))")
+          .eq("bull_catalog_id", id),
+      ]);
+      const projects = (projRes.data ?? []).filter((r: any) => {
+        const s = r.projects?.status;
+        return s !== "Work Complete" && s !== "Invoiced";
+      });
+      const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
+      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered"]);
+      const allOpenOrders = (ordRes.data ?? []).filter((r: any) =>
+        !TERMINAL_ITEM.has(r.item_status) && !TERMINAL_ORDER.has(r.semen_orders?.fulfillment_status),
+      );
+      const customerOrders = allOpenOrders.filter((r: any) => r.semen_orders?.order_type === "customer");
+      const inventoryOrders = allOpenOrders.filter((r: any) => r.semen_orders?.order_type === "inventory");
+      return { projects, customerOrders, inventoryOrders };
+    },
+  });
+
   const filtered = useMemo(() => {
     let result = rows;
     // Shelf-mode toggle: "available" hides customer-owned rows in the visible table only.
     // Stats above are computed off the full `rows` set so they always reflect reality.
     if (shelfMode === "available") result = result.filter((r) => !r.customerId);
     if (storageFilter !== "all") result = result.filter((r) => r.storageType === storageFilter);
+    if (breedFilter !== "all") result = result.filter((r) => r.breed === breedFilter);
     if (ownerFilter === "company") {
       result = result.filter((r) => !r.customerId);
     } else if (ownerFilter === "customer") {
@@ -207,6 +336,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       let aVal: string | number, bVal: string | number;
       switch (sortKey) {
         case "bull_name": aVal = a.bullName.toLowerCase(); bVal = b.bullName.toLowerCase(); break;
+        case "breed": aVal = (a.breed || "").toLowerCase(); bVal = (b.breed || "").toLowerCase(); break;
         case "customer": aVal = a.customer.toLowerCase(); bVal = b.customer.toLowerCase(); break;
         case "tank": aVal = a.tankName.toLowerCase(); bVal = b.tankName.toLowerCase(); break;
         case "units": aVal = a.units; bVal = b.units; break;
@@ -217,7 +347,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       return 0;
     });
     return result;
-  }, [rows, shelfMode, storageFilter, ownerFilter, search, sortKey, sortDir]);
+  }, [rows, shelfMode, storageFilter, ownerFilter, breedFilter, search, sortKey, sortDir]);
 
   const groupedByBull = useMemo(() => {
     if (viewMode !== "grouped") return [];
@@ -514,6 +644,17 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
             </SelectContent>
           </Select>
         </div>
+        <div className="w-44">
+          <Select value={breedFilter} onValueChange={setBreedFilter}>
+            <SelectTrigger><SelectValue placeholder="Breed" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Breeds</SelectItem>
+              {breedOptions.map((b) => (
+                <SelectItem key={b.name} value={b.name}>{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="w-36">
           <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); onFilterReset?.(); }}>
             <SelectTrigger><SelectValue placeholder="Owner" /></SelectTrigger>
@@ -561,10 +702,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
               <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow className="bg-muted/30">
-                    <TableHead className="w-[28%]"><SortHeader label="Bull" sortKeyVal="bull_name" /></TableHead>
-                    <TableHead className="w-[22%]"><SortHeader label="Location" sortKeyVal="tank" /></TableHead>
-                    <TableHead className="w-[22%]"><SortHeader label="Owner" sortKeyVal="customer" /></TableHead>
-                    <TableHead className="w-[10%] text-right"><SortHeader label="Units" sortKeyVal="units" /></TableHead>
+                    <TableHead className="w-[24%]"><SortHeader label="Bull" sortKeyVal="bull_name" /></TableHead>
+                    <TableHead className="w-[12%]"><SortHeader label="Breed" sortKeyVal="breed" /></TableHead>
+                    <TableHead className="w-[20%]"><SortHeader label="Location" sortKeyVal="tank" /></TableHead>
+                    <TableHead className="w-[18%]"><SortHeader label="Owner" sortKeyVal="customer" /></TableHead>
+                    <TableHead className="w-[8%] text-right"><SortHeader label="Units" sortKeyVal="units" /></TableHead>
                     <TableHead className="w-[12%]">Storage</TableHead>
                     <TableHead className="w-[6%]" />
                   </TableRow>
@@ -572,7 +714,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                 <TableBody>
                   {filtered.length === 0 && !isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6}>
+                      <TableCell colSpan={7}>
                         <EmptyState
                           icon={Archive}
                           title={rows.length === 0 ? "No inventory data" : "No results"}
@@ -585,8 +727,26 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                       const ownerDisplay = row.owner || row.customer;
                       const isZero = row.units === 0;
                       const subCanSuffix = row.subCanister && row.subCanister !== "—" ? ` / ${row.subCanister}` : "";
+                      const cust = row.bullCatalogId ? bullActivity.customerOrders[row.bullCatalogId] : undefined;
+                      const inv = row.bullCatalogId ? bullActivity.inventoryOrders[row.bullCatalogId] : undefined;
+                      const proj = row.bullCatalogId ? bullActivity.projects[row.bullCatalogId] : undefined;
+                      const hasActivity = !!(cust || inv || proj);
+                      const pendingUnits = (proj?.units ?? 0) + (cust?.units ?? 0);
+                      const isExpanded = expandedRow === row.id;
+                      const toggleRow = () => {
+                        if (!hasActivity) return;
+                        setExpandedRow((cur) => (cur === row.id ? null : row.id));
+                      };
                       return (
-                        <TableRow key={row.id} className={cn("hover:bg-muted/20", isZero && "opacity-60")}>
+                        <Fragment key={row.id}>
+                        <TableRow
+                          className={cn(
+                            "hover:bg-muted/20",
+                            isZero && "opacity-60",
+                            hasActivity && "cursor-pointer",
+                          )}
+                          onClick={hasActivity ? toggleRow : undefined}
+                        >
                           <TableCell className="align-top">
                             <div className="font-medium truncate flex items-center gap-1" title={row.bullName}>
                               <span className="truncate">{row.bullName}</span>
@@ -599,8 +759,43 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                                   <Pencil className="h-3 w-3" />
                                 </button>
                               )}
+                              {hasActivity && (
+                                isExpanded
+                                  ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" />
+                                  : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                              )}
                             </div>
                             <div className="text-xs font-mono text-muted-foreground truncate" title={row.bullCode}>{row.bullCode}</div>
+                            {hasActivity ? (
+                              <div className="mt-1 text-[11px] flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                                {cust && (
+                                  <span style={{ color: "#D85A30" }}>
+                                    {cust.count} customer order{cust.count === 1 ? "" : "s"} ({cust.units} units)
+                                  </span>
+                                )}
+                                {cust && (inv || proj) && <span className="text-muted-foreground/60">·</span>}
+                                {inv && (
+                                  <span className="text-info">
+                                    {inv.count} incoming ({inv.unitsPending} units pending)
+                                  </span>
+                                )}
+                                {inv && proj && <span className="text-muted-foreground/60">·</span>}
+                                {proj && (
+                                  <span style={{ color: "#639922" }}>
+                                    {proj.count} project{proj.count === 1 ? "" : "s"} ({proj.units} units needed)
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              row.bullCatalogId && (
+                                <div className="mt-1 text-[11px] text-muted-foreground/70">
+                                  No orders or projects
+                                </div>
+                              )
+                            )}
+                          </TableCell>
+                          <TableCell className="align-top text-sm text-muted-foreground">
+                            {row.breed || "—"}
                           </TableCell>
                           <TableCell className="align-top">
                             <div className="truncate" title={`${row.tankName} #${row.tankNumber}`}>
@@ -615,6 +810,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                           </TableCell>
                           <TableCell className={cn("text-right align-top tabular-nums font-medium", isZero && "text-muted-foreground font-normal")}>
                             {row.units}
+                            {pendingUnits > 0 && (
+                              <div className="text-[11px] font-normal text-orange-500" title="Units committed to active projects + open orders">
+                                {pendingUnits} pending
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="align-top">
                             <Badge variant="outline" className={STORAGE_BADGES[row.storageType] || "bg-muted text-muted-foreground border-border"}>
@@ -653,6 +853,139 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                             </DropdownMenu>
                           </TableCell>
                         </TableRow>
+                        {isExpanded && (
+                          <TableRow className="bg-muted/10 hover:bg-muted/10">
+                            <TableCell colSpan={7} className="py-3 space-y-3" onClick={(e) => e.stopPropagation()}>
+                              {!bullDetail ? (
+                                <div className="text-xs text-muted-foreground">Loading…</div>
+                              ) : (
+                                <>
+                                  {bullDetail.customerOrders.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <div className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1" style={{ color: "#993C1D" }}>
+                                        <ArrowUpRight className="h-3.5 w-3.5" />
+                                        Going out — Customer orders
+                                      </div>
+                                      {bullDetail.customerOrders.map((oi: any, idx: number) => {
+                                        const o = oi.semen_orders;
+                                        const status = oi.item_status ?? "pending";
+                                        return (
+                                          <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => navigate(`/semen-orders/${o.id}`)}
+                                            className="w-full text-left rounded-md px-2.5 py-1.5 text-xs grid grid-cols-[1fr_auto_auto_auto] gap-3 items-baseline hover:opacity-90 transition-opacity"
+                                            style={{ backgroundColor: "#FAECE7", color: "#712B13" }}
+                                          >
+                                            <div className="truncate font-medium" style={{ color: "#712B13" }}>{o?.customers?.name ?? "—"}</div>
+                                            <div style={{ color: "#993C1D" }}>{o?.order_date ? format(new Date(o.order_date), "MMM d, yyyy") : "—"}</div>
+                                            <div className="tabular-nums">
+                                              <span className="font-medium">{oi.units ?? 0}</span>
+                                              <span style={{ color: "#993C1D" }}> units</span>
+                                            </div>
+                                            <Badge
+                                              variant="outline"
+                                              className="capitalize text-[10px] border-current"
+                                              style={{ backgroundColor: "transparent", borderColor: "#993C1D", color: "#993C1D" }}
+                                            >
+                                              {status.replace(/_/g, " ")}
+                                            </Badge>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {bullDetail.inventoryOrders.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <div className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1" style={{ color: "#185FA5" }}>
+                                        <ArrowDownLeft className="h-3.5 w-3.5" />
+                                        Coming in — Inventory orders
+                                      </div>
+                                      {bullDetail.inventoryOrders.map((oi: any, idx: number) => {
+                                        const o = oi.semen_orders;
+                                        const status = oi.item_status ?? "pending";
+                                        const company = o?.semen_companies?.name ?? "—";
+                                        return (
+                                          <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => navigate(`/semen-orders/${o.id}`)}
+                                            className="w-full text-left rounded-md px-2.5 py-1.5 text-xs grid grid-cols-[1fr_auto_auto_auto] gap-3 items-baseline hover:opacity-90 transition-opacity"
+                                            style={{ backgroundColor: "#E6F1FB", color: "#0C447C" }}
+                                          >
+                                            <div className="truncate font-medium" style={{ color: "#0C447C" }}>
+                                              {company}
+                                              {o?.placed_by ? <span style={{ color: "#185FA5" }}> — {o.placed_by}</span> : null}
+                                            </div>
+                                            <div style={{ color: "#185FA5" }}>{o?.order_date ? format(new Date(o.order_date), "MMM d, yyyy") : "—"}</div>
+                                            <div className="tabular-nums">
+                                              <span className="font-medium">{oi.units ?? 0}</span>
+                                              <span style={{ color: "#185FA5" }}> units</span>
+                                              {oi.units_received > 0 && <span style={{ color: "#185FA5" }}> · {oi.units_received} recv</span>}
+                                            </div>
+                                            <Badge
+                                              variant="outline"
+                                              className="capitalize text-[10px]"
+                                              style={{ backgroundColor: "transparent", borderColor: "#185FA5", color: "#185FA5" }}
+                                            >
+                                              {status.replace(/_/g, " ")}
+                                            </Badge>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {bullDetail.projects.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <div className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1" style={{ color: "#3B6D11" }}>
+                                        <ClipboardList className="h-3.5 w-3.5" />
+                                        Projects
+                                      </div>
+                                      {bullDetail.projects.map((pb: any, idx: number) => {
+                                        const p = pb.projects;
+                                        return (
+                                          <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => navigate(`/project/${p.id}`)}
+                                            className="w-full text-left rounded-md px-2.5 py-1.5 text-xs grid grid-cols-[1fr_auto_auto_auto] gap-3 items-baseline hover:opacity-90 transition-opacity"
+                                            style={{ backgroundColor: "#EAF3DE", color: "#27500A" }}
+                                          >
+                                            <div className="truncate font-medium" style={{ color: "#27500A" }}>{p.name}</div>
+                                            <div style={{ color: "#3B6D11" }}>
+                                              {p.breeding_date ? format(new Date(p.breeding_date), "MMM d, yyyy") : "—"}
+                                              {p.protocol ? ` · ${p.protocol}` : ""}
+                                            </div>
+                                            <div className="tabular-nums">
+                                              <span className="font-medium">{pb.units ?? 0}</span>
+                                              <span style={{ color: "#3B6D11" }}> units</span>
+                                            </div>
+                                            <Badge
+                                              variant="outline"
+                                              className="capitalize text-[10px]"
+                                              style={{ backgroundColor: "transparent", borderColor: "#3B6D11", color: "#3B6D11" }}
+                                            >
+                                              {p.status}
+                                            </Badge>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {bullDetail.customerOrders.length === 0 &&
+                                    bullDetail.inventoryOrders.length === 0 &&
+                                    bullDetail.projects.length === 0 && (
+                                      <div className="text-xs text-muted-foreground">No orders or projects.</div>
+                                    )}
+                                </>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       );
                     })
                   )}
@@ -683,6 +1016,10 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                     const ownerDisplay = row.owner || row.customer;
                     const isZero = row.units === 0;
                     const subCanSuffix = row.subCanister && row.subCanister !== "—" ? ` / ${row.subCanister}` : "";
+                    const mPendingUnits = row.bullCatalogId
+                      ? (bullActivity.projects[row.bullCatalogId]?.units ?? 0) +
+                        (bullActivity.customerOrders[row.bullCatalogId]?.units ?? 0)
+                      : 0;
                     return (
                       <div key={row.id} className={cn("p-4 space-y-3", isZero && "opacity-60")}>
                         <div className="flex items-start justify-between gap-3">
@@ -706,6 +1043,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                               <div className={cn("text-lg font-bold tabular-nums leading-none", isZero && "text-muted-foreground font-normal")}>
                                 {row.units}
                               </div>
+                              {mPendingUnits > 0 && (
+                                <div className="text-[10px] text-orange-500 mt-0.5">
+                                  {mPendingUnits} pending
+                                </div>
+                              )}
                               <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">units</div>
                             </div>
                             <DropdownMenu>

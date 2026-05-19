@@ -48,6 +48,12 @@ interface LineItem {
   tankId: string;
   canister: string;
   itemType: "semen" | "embryo";
+  // Per-line order attribution (multi-order shipment support).
+  // null orderId = unordered inventory.
+  // addToOrder=true tells confirm_shipment to insert a new
+  // semen_order_items row on the picked order if the bull isn't on it yet.
+  orderId: string | null;
+  addToOrder?: boolean;
 }
 
 interface BullGroup {
@@ -57,7 +63,7 @@ interface BullGroup {
   items: LineItem[];
 }
 
-const emptyLine = (): LineItem => ({
+const emptyLine = (defaultOrderId?: string | null): LineItem => ({
   key: crypto.randomUUID(),
   groupId: crypto.randomUUID(),
   bullName: "",
@@ -66,6 +72,8 @@ const emptyLine = (): LineItem => ({
   tankId: "",
   canister: "",
   itemType: "semen",
+  orderId: defaultOrderId ?? null,
+  addToOrder: false,
 });
 
 // -----------------------------------------------------------------------------
@@ -603,6 +611,8 @@ const ReceiveShipment = () => {
             tankId: "",
             canister: "",
             itemType: "semen" as const,
+            orderId: selectedOrderId,
+            addToOrder: false,
           }));
           setLines(newLines);
         }
@@ -733,6 +743,8 @@ const ReceiveShipment = () => {
       tankId: "",
       canister: "",
       itemType: group.items[0]?.itemType || "semen",
+      orderId: group.items[0]?.orderId ?? selectedOrderId ?? null,
+      addToOrder: group.items[0]?.addToOrder ?? false,
     };
     const lastKey = group.items[group.items.length - 1].key;
     setLines((prev) => {
@@ -824,7 +836,10 @@ const ReceiveShipment = () => {
         documentPath = path;
       }
 
-      // Build draft snapshot
+      // Build draft snapshot. Per-line orderId + addToOrder gives the
+      // confirm_shipment RPC enough info to attribute each transaction to
+      // the right PO and (when requested) auto-insert a semen_order_items
+      // row for bulls that arrived without being on the original order.
       const draftLines = lines.map((l) => ({
         groupId: l.groupId,
         bullCatalogId: l.bullCatalogId,
@@ -833,6 +848,8 @@ const ReceiveShipment = () => {
         canister: l.canister.trim(),
         units: typeof l.units === "number" ? l.units : parseInt(String(l.units)) || 0,
         itemType: l.itemType,
+        orderId: l.orderId || null,
+        addToOrder: !!l.addToOrder,
       }));
 
       const snapshot = {
@@ -893,6 +910,92 @@ const ReceiveShipment = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Open inventory orders for the chosen semen company. Used to populate
+  // the per-line order picker — fulfilled / cancelled / delivered orders
+  // are not eligible for receives.
+  const openInventoryOrders = useMemo(() => {
+    if (!semenCompanyId) return [] as typeof orders;
+    const TERMINAL = new Set(["fulfilled", "cancelled", "delivered"]);
+    return (orders ?? []).filter(
+      (o: any) =>
+        o.order_type === "inventory" &&
+        o.semen_company_id === semenCompanyId &&
+        !TERMINAL.has(o.fulfillment_status),
+    );
+  }, [orders, semenCompanyId]);
+
+  // First-3-bulls + total-units summary per order, for the picker label.
+  const { data: orderSummaries = {} } = useQuery({
+    queryKey: ["receive-order-summaries", openInventoryOrders.map((o: any) => o.id).join(",")],
+    enabled: openInventoryOrders.length > 0,
+    queryFn: async () => {
+      const ids = openInventoryOrders.map((o: any) => o.id);
+      const { data } = await supabase
+        .from("semen_order_items")
+        .select("semen_order_id, units, custom_bull_name, bulls_catalog(bull_name)")
+        .in("semen_order_id", ids);
+      const map: Record<string, { bulls: string[]; units: number }> = {};
+      for (const r of (data ?? []) as any[]) {
+        const id = r.semen_order_id;
+        if (!map[id]) map[id] = { bulls: [], units: 0 };
+        map[id].units += r.units ?? 0;
+        const name = r.bulls_catalog?.bull_name ?? r.custom_bull_name ?? "";
+        if (name && map[id].bulls.length < 3) map[id].bulls.push(name);
+      }
+      return map;
+    },
+  });
+
+  const orderPickerLabel = (orderId: string) => {
+    const o = openInventoryOrders.find((x: any) => x.id === orderId);
+    if (!o) return "Unknown order";
+    const date = o.order_date ? format(parseISO(o.order_date), "MMM d") : "—";
+    const summary = orderSummaries[orderId];
+    const bulls = summary?.bulls?.join(", ") || "no bulls listed";
+    const units = summary?.units ?? 0;
+    return `${date} — ${bulls} (${units}u)`;
+  };
+
+  const UNORDERED_VALUE = "__unordered";
+  const ADD_PREFIX = "__add::";
+  const renderOrderPicker = (line: LineItem) => {
+    const value = line.addToOrder && line.orderId ? `${ADD_PREFIX}${line.orderId}` : (line.orderId ?? UNORDERED_VALUE);
+    return (
+      <Select
+        value={value}
+        onValueChange={(v) => {
+          if (v === UNORDERED_VALUE) {
+            updateLine(line.key, { orderId: null, addToOrder: false });
+          } else if (v.startsWith(ADD_PREFIX)) {
+            updateLine(line.key, { orderId: v.slice(ADD_PREFIX.length), addToOrder: true });
+          } else {
+            updateLine(line.key, { orderId: v, addToOrder: false });
+          }
+        }}
+      >
+        <SelectTrigger className="text-sm">
+          <SelectValue placeholder="Pick order…" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={UNORDERED_VALUE}>Unordered — add to inventory</SelectItem>
+          {openInventoryOrders.map((o: any) => (
+            <SelectItem key={o.id} value={o.id}>{orderPickerLabel(o.id)}</SelectItem>
+          ))}
+          {openInventoryOrders.length > 0 && (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">Add this bull to an order</div>
+              {openInventoryOrders.map((o: any) => (
+                <SelectItem key={`add-${o.id}`} value={`${ADD_PREFIX}${o.id}`}>
+                  + {orderPickerLabel(o.id)}
+                </SelectItem>
+              ))}
+            </>
+          )}
+        </SelectContent>
+      </Select>
+    );
   };
 
   const renderTankSelect = (line: LineItem, lineIndex: number) => (
@@ -1077,6 +1180,10 @@ const ReceiveShipment = () => {
                   </Button>
                 )}
                 <div className="space-y-1">
+                  <Label className="text-xs">Order</Label>
+                  {renderOrderPicker(line)}
+                </div>
+                <div className="space-y-1">
                   <Label className="text-xs">Destination Tank *</Label>
                   {renderTankSelect(line, idx)}
                 </div>
@@ -1105,6 +1212,9 @@ const ReceiveShipment = () => {
               </div>
             ) : (
               <div key={line.key} className="flex items-start gap-3 px-3 py-2">
+                <div className="w-44 shrink-0">
+                  {renderOrderPicker(line)}
+                </div>
                 <div className="flex-1 min-w-0">
                   {renderTankSelect(line, idx)}
                 </div>
@@ -1238,7 +1348,7 @@ const ReceiveShipment = () => {
                     {orders.map((o: any) => (
                       <SelectItem key={o.id} value={o.id}>
                         <span className="flex items-center gap-2">
-                          {o.customers?.name || (o.order_type === "inventory" ? (o.placed_by ? `Inventory — ${o.placed_by}` : "Inventory Order") : "—")} — {format(new Date(o.order_date + "T00:00:00"), "MMM d, yyyy")}
+                          {o.customers?.name || (o.order_type === "inventory" ? (o.placed_by ? `Inventory — ${o.placed_by}` : "Inventory Order") : "—")} — {o.order_date ? format(new Date(o.order_date + "T00:00:00"), "MMM d, yyyy") : "—"}
                           {alreadyReceivedStatuses.includes(o.fulfillment_status) && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
                               ✓ {o.fulfillment_status.replace(/_/g, " ")}
@@ -1491,8 +1601,8 @@ const ReceiveShipment = () => {
                   <X className="h-4 w-4 mr-1" /> Clear unreceived
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
-                <Plus className="h-4 w-4 mr-1" /> Add Bull
+              <Button variant="outline" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine(selectedOrderId || null)])}>
+                <Plus className="h-4 w-4 mr-1" /> Add line
               </Button>
             </div>
           </CardHeader>

@@ -16,21 +16,23 @@ import { getBullDisplayName } from "./bullDisplay";
 
 interface OrderData {
   customer_name: string;
-  order_date: string;
+  order_date: string | null;
   fulfillment_status: string;
   billing_status: string;
   notes: string | null;
   project_name?: string | null;
-  bills_through?: string | null;
 }
 
 interface OrderItemData {
   units: number;
   custom_bull_name: string | null;
+  bills_through: string | null;
+  fulfilled?: number;
   bulls_catalog: {
     bull_name: string;
     company: string;
     registration_number: string;
+    naab_code?: string | null;
   } | null;
 }
 
@@ -74,15 +76,14 @@ export function generateOrderPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(PDF_FONTS.sizeSubhead);
   doc.text(order.customer_name, margin, y);
-  y += 22;
+  y += 16;
 
   const infoRows: [string, string][] = [
-    ["Order Date", format(parseISO(order.order_date), "MMMM d, yyyy")],
+    ["Order Date", order.order_date ? format(parseISO(order.order_date), "MMMM d, yyyy") : "—"],
     ["Fulfillment", order.fulfillment_status.charAt(0).toUpperCase() + order.fulfillment_status.slice(1)],
     ["Billing", order.billing_status.charAt(0).toUpperCase() + order.billing_status.slice(1)],
   ];
 
-  if (order.bills_through) infoRows.push(["Bills Through", order.bills_through]);
   if (order.project_name) infoRows.push(["Linked Project", order.project_name]);
 
   doc.setFontSize(PDF_FONTS.sizeBodyTiny);
@@ -93,33 +94,40 @@ export function generateOrderPdf(
     doc.text(value, margin + 110, y);
     y += PDF_LAYOUT.lineHeight;
   }
-  y += 10;
+  y += 6;
 
   // Bulls table
   if (items.length > 0) {
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
+    doc.setFontSize(11);
     doc.text("Bulls & Units", margin, y);
-    y += 8;
+    y += 4;
 
     const tableBody = items.map((item) => [
       getBullDisplayName(item),
+      item.bulls_catalog?.naab_code || "—",
       item.bulls_catalog?.company || "—",
-      item.bulls_catalog?.registration_number || "—",
+      item.bills_through || "—",
       String(item.units),
+      String(item.fulfilled ?? 0),
     ]);
 
     const totalUnits = items.reduce((s, i) => s + i.units, 0);
-    tableBody.push(["", "", "Total", String(totalUnits)]);
+    const totalFulfilled = items.reduce((s, i) => s + (i.fulfilled ?? 0), 0);
+    tableBody.push(["", "", "", "Total", String(totalUnits), String(totalFulfilled)]);
 
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [["Bull Name", "Company", "Reg #", "Units"]],
+      head: [["Bull", "NAAB", "Company", "Bills Through", "Ordered", "Fulfilled"]],
       body: tableBody,
-      styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 5 },
+      styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 3 },
       headStyles: getStandardHeadStyles(),
       alternateRowStyles: { fillColor: [245, 245, 245] },
+      columnStyles: {
+        4: { halign: "right" },
+        5: { halign: "right" },
+      },
       didParseCell: (data) => {
         if (data.row.index === tableBody.length - 1 && data.section === "body") {
           data.cell.styles.fontStyle = "bold";
@@ -130,13 +138,13 @@ export function generateOrderPdf(
 
   // Reconciliation
   if (reconciliation && reconciliation.lines.length > 0) {
-    let reconY = ((doc as any).lastAutoTable?.finalY ?? y) + 20;
+    let reconY = ((doc as any).lastAutoTable?.finalY ?? y) + 12;
     reconY = ensurePageSpace(doc, reconY, 80, margin);
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
+    doc.setFontSize(11);
     doc.text(reconciliation.type === "packed" ? "Packed from Inventory" : "Received Shipments", margin, reconY);
-    reconY += 8;
+    reconY += 4;
 
     const reconBody = reconciliation.lines.map((line) => [
       line.bull_name,
@@ -150,12 +158,12 @@ export function generateOrderPdf(
       margin: { left: margin, right: margin },
       head: [["Bull", "Code", reconciliation.type === "packed" ? "Source Tank" : "Shipment", "Units"]],
       body: reconBody,
-      styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 5 },
+      styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 3 },
       headStyles: getStandardHeadStyles(),
       alternateRowStyles: { fillColor: [245, 245, 245] },
     });
 
-    let summaryY = ((doc as any).lastAutoTable?.finalY ?? reconY) + 14;
+    let summaryY = ((doc as any).lastAutoTable?.finalY ?? reconY) + 8;
     summaryY = ensurePageSpace(doc, summaryY, 30, margin);
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
@@ -173,13 +181,13 @@ export function generateOrderPdf(
 
   // Supplies
   if (supplies && supplies.length > 0) {
-    let supplyY = ((doc as any).lastAutoTable?.finalY ?? y) + 20;
+    let supplyY = ((doc as any).lastAutoTable?.finalY ?? y) + 12;
     supplyY = ensurePageSpace(doc, supplyY, 80, margin);
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
+    doc.setFontSize(11);
     doc.text("Supplies", margin, supplyY);
-    supplyY += 8;
+    supplyY += 4;
 
     const supplyBody = supplies.map((s) => [
       s.product_name,
@@ -197,7 +205,7 @@ export function generateOrderPdf(
       margin: { left: margin, right: margin },
       head: [["Product", "Qty", "Unit", "Price", "Total"]],
       body: supplyBody,
-      styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 5 },
+      styles: { fontSize: PDF_FONTS.sizeSmall, cellPadding: 3 },
       headStyles: getStandardHeadStyles(),
       alternateRowStyles: { fillColor: [245, 245, 245] },
       didParseCell: (data) => {
@@ -209,19 +217,19 @@ export function generateOrderPdf(
   }
 
   // Notes
-  const finalY = (doc as any).lastAutoTable?.finalY ?? y + 20;
-  let notesY = finalY + 20;
+  const finalY = (doc as any).lastAutoTable?.finalY ?? y + 12;
+  let notesY = finalY + 12;
 
   if (order.notes) {
     notesY = ensurePageSpace(doc, notesY, 60, margin);
-    if (notesY !== finalY + 20) {
+    if (notesY !== finalY + 12) {
       // We added a page, so reset notesY
       notesY = margin;
     }
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
+    doc.setFontSize(11);
     doc.text("Notes", margin, notesY);
-    notesY += 16;
+    notesY += 10;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     const lines = doc.splitTextToSize(order.notes, pageWidth - margin * 2);
@@ -230,6 +238,6 @@ export function generateOrderPdf(
 
   addFooterToPdf(doc, "BeefSynch by Chuteside, LLC");
 
-  const safeDate = order.order_date.replace(/-/g, "");
+  const safeDate = (order.order_date ?? new Date().toISOString().slice(0, 10)).replace(/-/g, "");
   doc.save(buildPdfFilename("BeefSynch_Order", order.customer_name, safeDate));
 }

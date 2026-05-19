@@ -174,7 +174,7 @@ export default function SessionsTab({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[180px]">Product</TableHead>
+                  <TableHead className="w-[180px]">Product / Service</TableHead>
                   <TableHead className="w-[80px] text-right">Head</TableHead>
                   <TableHead className="w-[100px] text-right">Units</TableHead>
                   <TableHead className="w-[90px] text-right">Price</TableHead>
@@ -200,14 +200,15 @@ export default function SessionsTab({
                         }, {})
                       ).sort((a, b) => a[0].localeCompare(b[0]))
                     : [];
+                  const isInvoicedLine = !!(line.invoiced);
                   return (
-                    <TableRow key={line.id || idx}>
+                    <TableRow key={line.id || idx} className={isInvoicedLine ? "opacity-50 bg-muted/30" : ""}>
                       <TableCell className="text-sm">
-                        {isMisc ? (
+                        {isMisc && !isInvoicedLine ? (
                           <Input className="h-8 text-xs" value={line.product_name === "Miscellaneous" ? "" : line.product_name}
                             placeholder="What is this item?"
                             onChange={(e) => onSaveProduct(idx, { product_name: e.target.value || "Miscellaneous" })} />
-                        ) : showSwap ? (
+                        ) : showSwap && !isInvoicedLine ? (
                           <Select value={line.billing_product_id || ""} onValueChange={(v) => onSwapProduct(idx, v)}>
                             <SelectTrigger className="h-8 text-xs"><SelectValue>{line.product_name}</SelectValue></SelectTrigger>
                             <SelectContent>
@@ -223,16 +224,23 @@ export default function SessionsTab({
                               )}
                             </SelectContent>
                           </Select>
-                        ) : <span>{line.product_name}</span>}
+                        ) : (
+                          <span>
+                            {line.product_name}
+                            {isInvoicedLine && (
+                              <Badge variant="outline" className="text-[9px] py-0 px-1 ml-1 border-emerald-500/40 text-emerald-600">Invoiced</Badge>
+                            )}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {isEditing ? (
+                        {isEditing && !isInvoicedLine ? (
                           <Input type="number" className="h-8 w-[70px] text-right text-xs ml-auto" value={line.doses || ""} placeholder="—"
                             onChange={(e) => onSaveProduct(idx, { doses: Number(e.target.value) || 0 })} />
-                        ) : <span className="text-sm">{line.doses || "—"}</span>}
+                        ) : <span className={`text-sm ${(line.doses ?? 0) > 0 ? "text-base font-bold text-emerald-700" : ""}`}>{line.doses || "—"}</span>}
                       </TableCell>
                       <TableCell className="text-right">
-                        {isEditing ? (
+                        {isEditing && !isInvoicedLine ? (
                           <div className="flex items-center justify-end gap-1">
                             <Input
                               type="number"
@@ -258,20 +266,26 @@ export default function SessionsTab({
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs">{fmtUnits(line)}</span>
+                          <span className={`text-xs ${(line.units_billed ?? 0) > 0 ? "text-sm font-bold text-emerald-700" : ""}`}>{fmtUnits(line)}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {isEditing ? (
+                        {isEditing && !isInvoicedLine ? (
                           <Input type="number" step="0.01" className="h-8 w-[80px] text-right text-xs ml-auto" value={line.unit_price ?? ""} placeholder="—"
                             onChange={(e) => onSaveProduct(idx, { unit_price: Number(e.target.value) || 0 })} />
                         ) : <span className="text-sm">{line.unit_price ? formatCurrency(line.unit_price) : "—"}</span>}
                       </TableCell>
                       <TableCell className="text-right text-sm font-medium">{line.line_total ? formatCurrency(line.line_total) : "—"}</TableCell>
-                      {isEditing && (
+                      {isEditing && !isInvoicedLine && (
                         <TableCell className="text-center p-1">
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => onRemoveProduct(idx)}><Trash2 className="h-3 w-3" /></Button>
+                            onClick={() => {
+                              const dm = line.delivery_method;
+                              if (dm && dm !== "not_yet") {
+                                if (!window.confirm(`This product is marked as "${dm === "pickup" ? "Pickup" : dm === "we_gave" ? "We gave" : "Drop off"}". Are you sure you want to delete it?`)) return;
+                              }
+                              onRemoveProduct(idx);
+                            }}><Trash2 className="h-3 w-3" /></Button>
                         </TableCell>
                       )}
                     </TableRow>
@@ -343,11 +357,28 @@ export default function SessionsTab({
                     </Button>
                   </div>
                 )}
+                {isEditing && (
+                  <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+                    <div>
+                      <label className="text-muted-foreground">Pickup date</label>
+                      <Input type="date" className="h-8 text-xs mt-1"
+                        value={s.session_date || ""}
+                        onChange={(e) => onSaveSession(sessionIdx, { session_date: e.target.value })} />
+                    </div>
+                  </div>
+                )}
                 {renderProductTable(sessionId, isEditing, prods, true)}
                 {!readOnly && (
                   <div className="flex justify-end pt-2">
                     <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
-                      onClick={() => onRemoveSession(sessionIdx)}><Trash2 className="h-3 w-3 mr-1" /> Remove pickup</Button>
+                      onClick={() => {
+                        const sessionProds = productsBySession.get(s.id || "") || [];
+                        const hasDelivered = sessionProds.some(p => p.delivery_method && p.delivery_method !== "not_yet");
+                        if (hasDelivered) {
+                          if (!window.confirm("This pickup has delivered products. Are you sure you want to remove it?")) return;
+                        }
+                        onRemoveSession(sessionIdx);
+                      }}><Trash2 className="h-3 w-3 mr-1" /> Remove pickup</Button>
                   </div>
                 )}
               </CardContent>
@@ -411,6 +442,30 @@ export default function SessionsTab({
                   <p className="text-sm text-muted-foreground italic">Customer administered — no billable products.</p>
                 ) : (
                   <>
+                    {isEditing && !isCustAdmin && (
+                      <div className="grid grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <label className="text-muted-foreground">Date</label>
+                          <Input type="date" className="h-8 text-xs mt-1"
+                            value={s.session_date || ""}
+                            onChange={(e) => onSaveSession(sessionIdx, { session_date: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="text-muted-foreground">Label</label>
+                          <Input className="h-8 text-xs mt-1"
+                            value={s.session_label || ""}
+                            placeholder="e.g. Timed Breeding"
+                            onChange={(e) => onSaveSession(sessionIdx, { session_label: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="text-muted-foreground">Time</label>
+                          <Input className="h-8 text-xs mt-1"
+                            value={s.time_of_day || ""}
+                            placeholder="e.g. 7:00 AM"
+                            onChange={(e) => onSaveSession(sessionIdx, { time_of_day: e.target.value })} />
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div>
                         <label className="text-muted-foreground">Crew</label>
@@ -432,7 +487,14 @@ export default function SessionsTab({
                 {isEditing && !readOnly && !isCustAdmin && (
                   <div className="flex justify-end pt-2">
                     <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
-                      onClick={() => onRemoveSession(sessionIdx)}><Trash2 className="h-3 w-3 mr-1" /> Remove session</Button>
+                      onClick={() => {
+                        const sessionProds = productsBySession.get(s.id || "") || [];
+                        const hasDelivered = sessionProds.some(p => p.delivery_method && p.delivery_method !== "not_yet");
+                        if (hasDelivered) {
+                          if (!window.confirm("This session has delivered products. Are you sure you want to remove it?")) return;
+                        }
+                        onRemoveSession(sessionIdx);
+                      }}><Trash2 className="h-3 w-3 mr-1" /> Remove session</Button>
                   </div>
                 )}
               </CardContent>
@@ -475,7 +537,9 @@ export default function SessionsTab({
                     <TableRow key={line.id}>
                       <TableCell className="text-xs">{line.event_date ? format(parseISO(line.event_date), "MMM d") : "—"}</TableCell>
                       <TableCell className="text-sm">{line.product_name}</TableCell>
-                      <TableCell className="text-right text-sm">{line.doses || "—"}</TableCell>
+                      <TableCell className="text-right text-sm">
+                        <span className={(line.doses ?? 0) > 0 ? "text-base font-bold text-emerald-700" : ""}>{line.doses || "—"}</span>
+                      </TableCell>
                       <TableCell className="text-right text-sm font-medium">{line.line_total ? formatCurrency(line.line_total) : "—"}</TableCell>
                     </TableRow>
                   ))}

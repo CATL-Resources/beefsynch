@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { format, parseISO, addDays, startOfDay } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +9,10 @@ import { Button } from "@/components/ui/button";
 import { InvoiceOrderModal } from "@/components/orders/InvoiceOrderModal";
 import {
   CalendarDays, Package, AlertTriangle, DollarSign,
-  Droplets, Truck, ChevronRight, Clock, CheckCircle2, XCircle,
+  Droplets, Truck, ChevronRight, Clock, CheckCircle2, XCircle, Printer,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
+import { generateOperationsSummaryPdf } from "@/lib/generateOperationsSummaryPdf";
 
 interface HubTabProps {
   orgId: string;
@@ -28,7 +30,14 @@ interface UpcomingProject {
   pack_id: string | null;
   pack_status: string | null;
   packed_units: number | null;
+  pack_tanks: { tank_name: string | null; tank_number: string | number }[];
   bull_names: string[];
+  products_delivered: number;
+  products_total: number;
+  has_labor: boolean;
+  billing_status: "none" | "started" | "complete";
+  product_summary: string;
+  in_process: boolean;
 }
 
 interface ActionCounts {
@@ -58,6 +67,24 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
     date: string;
     events: { id: string; eventName: string; eventTime: string | null; projectName: string; projectId: string; headCount: number }[];
   }[]>([]);
+  const [packedOutExpanded, setPackedOutExpanded] = useState(false);
+  const [packedOut, setPackedOut] = useState<Array<{
+    pack_id: string;
+    status: string;
+    tank_name: string | null;
+    tank_number: string | number;
+    projects: { id: string; name: string; customer_name: string | null; protocol: string | null; head_count: number | null; breeding_date: string | null }[];
+    bulls: { bull_name: string; bull_code: string | null; units: number }[];
+  }>>([]);
+  const [needsPacking, setNeedsPacking] = useState<Array<{
+    project_id: string;
+    name: string;
+    customer_name: string | null;
+    protocol: string | null;
+    head_count: number | null;
+    breeding_date: string;
+    bulls: { bull_name: string; naab_code: string | null; units: number }[];
+  }>>([]);
   const [readyToInvoice, setReadyToInvoice] = useState<Array<{
     id: string;
     customerName: string;
@@ -91,16 +118,27 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         const projIds = (projData || []).map((p) => p.id);
         const { data: packLinks } = await supabase
           .from("tank_pack_projects")
-          .select("project_id, tank_pack_id, tank_packs(id, status, tank_pack_lines(units))")
+          .select("project_id, tank_pack_id, tank_packs(id, status, tank_pack_lines(units), tanks!tank_packs_field_tank_id_fkey(tank_name, tank_number))")
           .in("project_id", projIds.length > 0 ? projIds : ["00000000-0000-0000-0000-000000000000"]);
 
         const packMap = new Map<string, { pack_id: string; pack_status: string; packed_units: number }>();
+        const packTanksMap = new Map<string, { tank_name: string | null; tank_number: string | number }[]>();
         if (packLinks) {
-          for (const link of packLinks) {
+          for (const link of packLinks as any[]) {
             const tp = link.tank_packs;
-            if (tp) {
-              const units = (tp.tank_pack_lines || []).reduce((s: number, l: any) => s + (l.units || 0), 0);
-              packMap.set(link.project_id, { pack_id: tp.id, pack_status: tp.status, packed_units: units });
+            if (!tp) continue;
+            // Skip cancelled / unpacked packs — they don't represent semen
+            // currently in a tank for this project.
+            if (tp.status === "cancelled" || tp.status === "unpacked") continue;
+            const units = (tp.tank_pack_lines || []).reduce((s: number, l: any) => s + (l.units || 0), 0);
+            // packMap keeps the most recent pack for the existing
+            // single-pack badge below; packTanksMap collects all of them.
+            packMap.set(link.project_id, { pack_id: tp.id, pack_status: tp.status, packed_units: units });
+            const tank = tp.tanks;
+            if (tank) {
+              const list = packTanksMap.get(link.project_id) ?? [];
+              list.push({ tank_name: tank.tank_name ?? null, tank_number: tank.tank_number });
+              packTanksMap.set(link.project_id, list);
             }
           }
         }
@@ -122,14 +160,97 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           }
         }
 
+        // Fetch protocol events to determine "in process" status
+        const inProcessSet = new Set<string>();
+        if (projIds.length > 0) {
+          const day7 = format(addDays(new Date(), 7), "yyyy-MM-dd");
+          const { data: eventDates } = await supabase
+            .from("protocol_events")
+            .select("project_id, event_date, event_name")
+            .in("project_id", projIds)
+            .not("event_name", "in", '("Return Heat","Estimated Calving")')
+            .lte("event_date", day7);
+          if (eventDates) {
+            for (const ev of eventDates) {
+              inProcessSet.add(ev.project_id);
+            }
+          }
+        }
+
+        // Fetch billing summary for each project
+        const billingMap = new Map<string, { products_delivered: number; products_total: number; has_labor: boolean; billing_status: string; product_summary: string }>();
+        if (projIds.length > 0) {
+          const { data: billingData } = await supabase
+            .from("project_billing")
+            .select("id, project_id, billing_completed_at")
+            .in("project_id", projIds);
+
+          if (billingData && billingData.length > 0) {
+            const billingIds = billingData.map(b => b.id);
+
+            // Products
+            const { data: prodData } = await supabase
+              .from("project_billing_products")
+              .select("billing_id, product_name, unit_label, delivery_method, doses, units_billed")
+              .in("billing_id", billingIds);
+
+            // Labor
+            const { data: laborData } = await supabase
+              .from("project_billing_labor")
+              .select("billing_id")
+              .in("billing_id", billingIds);
+
+            for (const bill of billingData) {
+              const prods = (prodData ?? []).filter(p => p.billing_id === bill.id);
+              const delivered = prods.filter(p => p.delivery_method && p.delivery_method !== "not_yet");
+              const hasValues = prods.filter(p => (p.doses ?? 0) > 0 || (Number(p.units_billed) ?? 0) > 0);
+              const hasLabor = (laborData ?? []).some(l => l.billing_id === bill.id);
+
+              // Build product summary like "2 bottle SynchSure (50 Dose), 19 bag CIDR"
+              const summaryParts: string[] = [];
+              for (const p of delivered) {
+                const qty = (Number(p.units_billed) ?? 0) > 0
+                  ? `${p.units_billed} ${p.unit_label || ""}`.trim()
+                  : (p.doses ?? 0) > 0 ? `${p.doses} hd` : "";
+                if (qty && p.product_name) {
+                  summaryParts.push(`${qty} ${p.product_name}`);
+                } else if (p.product_name) {
+                  summaryParts.push(p.product_name);
+                }
+              }
+              const summary = summaryParts.join(", ");
+
+              let status: "none" | "started" | "complete" = "none";
+              if (bill.billing_completed_at) status = "complete";
+              else if (delivered.length > 0 || hasValues.length > 0 || hasLabor) status = "started";
+
+              billingMap.set(bill.project_id, {
+                products_delivered: delivered.length,
+                products_total: prods.length,
+                has_labor: hasLabor,
+                billing_status: status,
+                product_summary: summary,
+              });
+            }
+          }
+        }
+
         for (const p of projData) {
           const pack = packMap.get(p.id);
+          const billing = billingMap.get(p.id);
           projectsWithPacks.push({
             ...p,
             pack_id: pack?.pack_id || null,
             pack_status: pack?.pack_status || null,
             packed_units: pack?.packed_units ?? null,
+            pack_tanks: packTanksMap.get(p.id) ?? [],
             bull_names: bullNameMap.get(p.id) || [],
+            products_delivered: billing?.products_delivered ?? 0,
+            products_total: billing?.products_total ?? 0,
+            has_labor: billing?.has_labor ?? false,
+            billing_status: (billing?.billing_status ?? "none") as "none" | "started" | "complete",
+            product_summary: billing?.product_summary ?? "",
+            in_process: inProcessSet.has(p.id),
           });
         }
       }
@@ -182,7 +303,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         // The RPC already correctly counts packs + direct sales + withdrawals.
         const filled = billableTotalById.get(o.id) ?? 0;
         const bullSummary = items
-          .map((i: any) => `${i.units} ${getBullDisplayName(i)}`)
+          .map((i: any) => `${i.units} ${getBullDisplayLabel(i)}`)
           .join(" + ");
         return {
           id: o.id,
@@ -200,13 +321,19 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       // Unbilled projects — merge into Ready to Invoice
       const { data: unbilled } = await supabase
         .from("projects")
-        .select("id, name, status, breeding_date, project_billing(billing_completed_at)")
+        .select("id, name, status, breeding_date, project_billing(billing_completed_at, status, catl_invoice_number, select_sires_invoice_number)")
         .eq("organization_id", orgId)
         .in("status", ["Work Complete", "Invoiced"]);
 
       const unbilledProjects = (unbilled || []).filter((p: any) => {
         const billing = Array.isArray(p.project_billing) ? p.project_billing[0] : p.project_billing;
-        return !billing?.billing_completed_at;
+        // Already stamped as complete
+        if (billing?.billing_completed_at) return false;
+        // Billing record says invoiced/closed
+        if (billing?.status === "invoiced_closed") return false;
+        // Has invoice numbers — clearly already invoiced
+        if (billing?.catl_invoice_number || billing?.select_sires_invoice_number) return false;
+        return true;
       });
 
       const projectRows = unbilledProjects.map((p: any) => ({
@@ -256,18 +383,19 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
 
       if (unpackedProjects.length > 0) {
         const unpackedIds = unpackedProjects.map(p => p.id);
+        // semen_source tells us who's supplying the semen. customer-supplied
+        // bulls are checked against the project customer's own inventory.
         const { data: projBulls } = await supabase
           .from("project_bulls")
-          .select("project_id, bull_catalog_id, custom_bull_name, units")
+          .select("project_id, bull_catalog_id, custom_bull_name, units, semen_source, projects!project_bulls_project_id_fkey(customer_id)")
           .in("project_id", unpackedIds);
 
         if (projBulls && projBulls.length > 0) {
-          // Get all bull_catalog_ids we need to check
           const catalogIds = (projBulls)
             .map(pb => pb.bull_catalog_id)
             .filter(Boolean);
 
-          // Sum available inventory per bull from tanks that are here
+          // Available company stock = tanks here + customer_id IS NULL.
           const { data: hereTanks } = await supabase
             .from("tanks")
             .select("id")
@@ -275,20 +403,39 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             .eq("location_status", "here");
           const hereTankIds = (hereTanks || []).map((t: any) => t.id);
 
-          const { data: invData } = await supabase.from("tank_inventory")
+          const { data: companyInv } = await supabase.from("tank_inventory")
             .select("bull_catalog_id, units")
             .is("customer_id", null)
             .in("bull_catalog_id", catalogIds.length > 0 ? catalogIds : ["00000000-0000-0000-0000-000000000000"])
             .in("tank_id", hereTankIds.length > 0 ? hereTankIds : ["00000000-0000-0000-0000-000000000000"]);
 
-          const availableByBull = new Map<string, number>();
-          for (const inv of (invData || []) as any[]) {
+          const companyAvailable = new Map<string, number>();
+          for (const inv of (companyInv || []) as any[]) {
             if (inv.bull_catalog_id) {
-              availableByBull.set(inv.bull_catalog_id, (availableByBull.get(inv.bull_catalog_id) || 0) + (inv.units || 0));
+              companyAvailable.set(inv.bull_catalog_id, (companyAvailable.get(inv.bull_catalog_id) || 0) + (inv.units || 0));
             }
           }
 
-          // Get bull names from catalog
+          // Customer-owned inventory keyed by `${customer_id}|${bull_catalog_id}`.
+          const customerIds = Array.from(new Set(
+            (projBulls as any[])
+              .map(pb => pb.projects?.customer_id as string | null | undefined)
+              .filter((x): x is string => !!x)
+          ));
+          const customerAvailable = new Map<string, number>();
+          if (customerIds.length > 0) {
+            const { data: custInv } = await supabase.from("tank_inventory")
+              .select("bull_catalog_id, customer_id, units")
+              .in("customer_id", customerIds)
+              .in("bull_catalog_id", catalogIds.length > 0 ? catalogIds : ["00000000-0000-0000-0000-000000000000"]);
+            for (const inv of (custInv || []) as any[]) {
+              if (inv.bull_catalog_id && inv.customer_id) {
+                const key = `${inv.customer_id}|${inv.bull_catalog_id}`;
+                customerAvailable.set(key, (customerAvailable.get(key) || 0) + (inv.units || 0));
+              }
+            }
+          }
+
           const { data: bullNames } = await supabase
             .from("bulls_catalog")
             .select("id, bull_name")
@@ -296,15 +443,23 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           const nameMap = new Map<string, string>();
           for (const b of (bullNames || []) as any[]) nameMap.set(b.id, b.bull_name);
 
-          // Check each project
           for (const proj of unpackedProjects) {
-            const bulls = (projBulls).filter(pb => pb.project_id === proj.id);
+            const bulls = (projBulls as any[]).filter(pb => pb.project_id === proj.id);
             const shortBulls: { bullName: string; needed: number; available: number }[] = [];
 
             for (const pb of bulls) {
               const needed = pb.units || 0;
               if (needed <= 0) continue;
-              const available = pb.bull_catalog_id ? (availableByBull.get(pb.bull_catalog_id) || 0) : 0;
+              if (!pb.bull_catalog_id) continue;
+              let available = 0;
+              if (pb.semen_source === "customer") {
+                const projCustomerId = pb.projects?.customer_id;
+                available = projCustomerId
+                  ? (customerAvailable.get(`${projCustomerId}|${pb.bull_catalog_id}`) || 0)
+                  : 0;
+              } else {
+                available = companyAvailable.get(pb.bull_catalog_id) || 0;
+              }
               if (available < needed) {
                 shortBulls.push({
                   bullName: nameMap.get(pb.bull_catalog_id) || pb.custom_bull_name || "Unknown",
@@ -372,6 +527,116 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         }));
 
         setWeekEvents(result);
+      }
+
+      // ── TANKS PACKED OUT ──────────────────────────────────────────────
+      const { data: packsData } = await supabase
+        .from("tank_packs")
+        .select(`
+          id, status, packed_at, customer_id, field_tank_id,
+          tanks!tank_packs_field_tank_id_fkey(tank_name, tank_number),
+          customers!tank_packs_customer_id_fkey(name),
+          tank_pack_lines(bull_name, bull_code, units),
+          tank_pack_projects(
+            project_id,
+            projects(id, name, protocol, head_count, breeding_date,
+              customers!projects_customer_id_fkey(name))
+          )
+        `)
+        .eq("organization_id", orgId)
+        .in("status", ["packed", "in_field", "shipped"]);
+
+      if (packsData) {
+        const cards = (packsData as any[])
+          // Project packs only — shipment/pickup packs have their own
+          // lifecycle and don't belong on the Hub's daily-ops view.
+          .filter((tp) => Array.isArray(tp.tank_pack_projects) && tp.tank_pack_projects.length > 0)
+          .map((tp) => ({
+            pack_id: tp.id,
+            status: tp.status,
+            tank_name: tp.tanks?.tank_name ?? null,
+            tank_number: tp.tanks?.tank_number ?? "",
+            projects: (tp.tank_pack_projects ?? []).map((link: any) => ({
+              id: link.projects?.id ?? link.project_id,
+              name: link.projects?.name ?? "Unknown project",
+              customer_name: link.projects?.customers?.name ?? tp.customers?.name ?? null,
+              protocol: link.projects?.protocol ?? null,
+              head_count: link.projects?.head_count ?? null,
+              breeding_date: link.projects?.breeding_date ?? null,
+            })),
+            bulls: (tp.tank_pack_lines ?? []).map((l: any) => ({
+              bull_name: l.bull_name,
+              bull_code: l.bull_code,
+              units: l.units ?? 0,
+            })),
+          }));
+        cards.sort((a, b) => {
+          const ad = a.projects[0]?.breeding_date ?? "9999";
+          const bd = b.projects[0]?.breeding_date ?? "9999";
+          return ad.localeCompare(bd);
+        });
+        setPackedOut(cards);
+      }
+
+      // ── NEEDS PACKING (next 7 days) ───────────────────────────────────
+      const day7 = format(addDays(new Date(), 7), "yyyy-MM-dd");
+      const { data: nextProjects } = await supabase
+        .from("projects")
+        .select(`
+          id, name, protocol, head_count, breeding_date,
+          customers!projects_customer_id_fkey(name)
+        `)
+        .eq("organization_id", orgId)
+        .not("status", "in", '("Work Complete","Invoiced")')
+        .gte("breeding_date", today)
+        .lte("breeding_date", day7)
+        .order("breeding_date");
+
+      if (nextProjects) {
+        const ids = nextProjects.map((p: any) => p.id);
+        const packedSet = new Set<string>();
+        if (ids.length > 0) {
+          const { data: packLinks } = await supabase
+            .from("tank_pack_projects")
+            .select("project_id, tank_packs!inner(status)")
+            .in("project_id", ids);
+          for (const r of (packLinks ?? []) as any[]) {
+            const s = r.tank_packs?.status;
+            if (!s) continue;
+            if (["cancelled", "unpacked", "tank_returned"].includes(s)) continue;
+            packedSet.add(r.project_id);
+          }
+        }
+        const unpackedProjectIds = ids.filter((pid: string) => !packedSet.has(pid));
+        const projBullsMap = new Map<string, { bull_name: string; naab_code: string | null; units: number }[]>();
+        if (unpackedProjectIds.length > 0) {
+          const { data: pb } = await supabase
+            .from("project_bulls")
+            .select("project_id, units, custom_bull_name, bulls_catalog(bull_name, naab_code)")
+            .in("project_id", unpackedProjectIds);
+          for (const r of (pb ?? []) as any[]) {
+            const list = projBullsMap.get(r.project_id) ?? [];
+            list.push({
+              bull_name: r.bulls_catalog?.bull_name ?? r.custom_bull_name ?? "Unknown",
+              naab_code: r.bulls_catalog?.naab_code ?? null,
+              units: r.units ?? 0,
+            });
+            projBullsMap.set(r.project_id, list);
+          }
+        }
+        setNeedsPacking(
+          nextProjects
+            .filter((p: any) => unpackedProjectIds.includes(p.id))
+            .map((p: any) => ({
+              project_id: p.id,
+              name: p.name,
+              customer_name: p.customers?.name ?? null,
+              protocol: p.protocol ?? null,
+              head_count: p.head_count ?? null,
+              breeding_date: p.breeding_date,
+              bulls: projBullsMap.get(p.id) ?? [],
+            })),
+        );
       }
 
       setLoading(false);
@@ -490,7 +755,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           {actions.tanksOut > 0 && (
             <Card
               className="cursor-pointer border-amber-500/40 bg-amber-500/5 transition-colors hover:bg-amber-500/10"
-              onClick={() => onSwitchTab("inventory", { view: "tank", subTab: "out" })}
+              onClick={() => onSwitchTab("tanks", { subTab: "out" })}
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
@@ -569,7 +834,12 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       {readyToInvoice.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold font-display">Ready to invoice</h2>
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-lg font-semibold font-display">Ready to invoice</h2>
+              <Link to="/billable" className="text-xs text-primary hover:underline">
+                Open full report →
+              </Link>
+            </div>
             <span className="text-sm text-muted-foreground">
               {readyToInvoice.length} item{readyToInvoice.length !== 1 ? "s" : ""}
             </span>
@@ -631,6 +901,157 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         </section>
       )}
 
+      {/* TANKS PACKED OUT */}
+      {packedOut.length > 0 && (
+        <section className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setPackedOutExpanded((v) => !v)}
+            className="flex items-baseline justify-between w-full text-left hover:opacity-80 transition-opacity"
+            aria-expanded={packedOutExpanded}
+          >
+            <div className="flex items-center gap-2">
+              {packedOutExpanded ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+              <h2 className="text-lg font-semibold font-display">Tanks packed out</h2>
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {packedOut.length} tank{packedOut.length !== 1 ? "s" : ""}
+            </span>
+          </button>
+          {packedOutExpanded && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {packedOut.map((p) => {
+              const totalUnits = p.bulls.reduce((s, b) => s + b.units, 0);
+              return (
+                <Card
+                  key={p.pack_id}
+                  className="cursor-pointer border-emerald-500/30 bg-emerald-500/5 transition-colors hover:bg-emerald-500/10"
+                  onClick={() => navigate(`/pack/${p.pack_id}`)}
+                >
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Package className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold text-sm truncate">
+                          {p.tank_name ? `${p.tank_name} (#${p.tank_number})` : `Tank #${p.tank_number}`}
+                        </span>
+                      </div>
+                      <Badge variant="outline" className="capitalize text-[10px]">
+                        {p.status.replace(/_/g, " ")}
+                      </Badge>
+                    </div>
+                    {p.projects.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No project linked</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {p.projects.map((proj) => (
+                          <div key={proj.id} className="text-xs">
+                            <div className="font-medium truncate">{proj.customer_name ?? "—"}</div>
+                            <div className="text-muted-foreground truncate">
+                              {proj.name}
+                              {proj.protocol ? ` · ${proj.protocol}` : ""}
+                              {proj.head_count != null ? ` · ${proj.head_count} hd` : ""}
+                              {proj.breeding_date ? ` · ${format(parseISO(proj.breeding_date), "MMM d")}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {p.bulls.length > 0 && (
+                      <div className="border-t border-border/40 pt-2 space-y-0.5 text-xs">
+                        {p.bulls.map((b, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-2">
+                            <span className="truncate">
+                              {b.bull_name}
+                              {b.bull_code ? <span className="text-muted-foreground"> · {b.bull_code}</span> : null}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">{b.units}u</span>
+                          </div>
+                        ))}
+                        <div className="flex items-baseline justify-between gap-2 pt-1 font-semibold">
+                          <span>Total</span>
+                          <span className="tabular-nums">{totalUnits}u</span>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+          )}
+        </section>
+      )}
+
+      {/* NEEDS PACKING — NEXT 7 DAYS */}
+      {needsPacking.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold font-display">Needs packing — next 7 days</h2>
+            <span className="text-sm text-muted-foreground">
+              {needsPacking.length} project{needsPacking.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {needsPacking.map((p) => {
+              const d = startOfDay(parseISO(p.breeding_date));
+              const diffDays = Math.round((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              const isUrgent = diffDays <= 2;
+              return (
+                <Card
+                  key={p.project_id}
+                  className={`border-amber-500/40 bg-amber-500/5 transition-colors hover:bg-amber-500/10`}
+                >
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{p.customer_name ?? "—"}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {p.name}
+                          {p.protocol ? ` · ${p.protocol}` : ""}
+                          {p.head_count != null ? ` · ${p.head_count} hd` : ""}
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={isUrgent ? "bg-destructive/15 text-destructive border-destructive/40" : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40"}
+                      >
+                        {diffDays === 0 ? "TODAY" : diffDays === 1 ? "Tomorrow" : `${diffDays}d`}
+                      </Badge>
+                    </div>
+                    {p.bulls.length > 0 && (
+                      <div className="border-t border-border/40 pt-2 space-y-0.5 text-xs">
+                        {p.bulls.map((b, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-2">
+                            <span className="truncate">
+                              {b.bull_name}
+                              {b.naab_code ? <span className="text-muted-foreground"> · {b.naab_code}</span> : null}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">{b.units}u</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={() => navigate(`/pack-tank?projectId=${p.project_id}`)}
+                      >
+                        <Package className="h-3.5 w-3.5 mr-1.5" /> Pack tank
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* THIS WEEK */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
@@ -640,6 +1061,10 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             <span className="text-xs text-muted-foreground">
               {format(today, "MMM d")} – {format(addDays(today, 6), "MMM d")}
             </span>
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1 ml-2"
+              onClick={() => generateOperationsSummaryPdf(orgId)}>
+              <Printer className="h-3.5 w-3.5" /> Print Summary
+            </Button>
           </div>
           <span className="text-xs text-muted-foreground">
             {thisWeek.length} project{thisWeek.length !== 1 ? "s" : ""}
@@ -666,6 +1091,9 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold text-base truncate">{p.name}</h3>
                         <Badge variant="outline" className="text-[10px]">{p.status}</Badge>
+                        {p.in_process && (
+                          <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px] py-0 px-1.5">In Process</Badge>
+                        )}
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                         <span>{format(parseISO(p.breeding_date), "EEE, MMM d")}</span>
@@ -680,6 +1108,29 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                         <p className="mt-0.5 text-xs text-primary/80 truncate">
                           {p.bull_names.join(", ")}
                         </p>
+                      )}
+                      {p.pack_tanks.length > 0 && (
+                        <p className="mt-0.5 text-xs text-muted-foreground truncate">
+                          Packed in: {p.pack_tanks
+                            .map((t) => (t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `#${t.tank_number}`))
+                            .join(", ")}
+                        </p>
+                      )}
+                      {/* Product + labor summary strip */}
+                      {(p.product_summary || p.has_labor) && (
+                        <div className="mt-1.5 flex flex-col gap-1 text-[11px]">
+                          {p.product_summary && (
+                            <p className="text-emerald-700 leading-snug">{p.product_summary}</p>
+                          )}
+                          {p.has_labor && (
+                            <span className="inline-flex items-center gap-1 text-blue-700 w-fit">
+                              Labor entered
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {p.in_process && !p.product_summary && !p.has_labor && (
+                        <p className="mt-1 text-[11px] text-muted-foreground/60 italic">Synch started — no products delivered yet</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -789,6 +1240,12 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
                     <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
                       {p.bull_names.length > 0 && (
                         <span className="text-primary/80 truncate max-w-[150px]">{p.bull_names.join(", ")}</span>
+                      )}
+                      {p.in_process && (
+                        <span className="text-[10px] font-medium text-primary">In Process</span>
+                      )}
+                      {p.products_delivered > 0 && (
+                        <span className="text-[10px] text-emerald-600 truncate max-w-[200px]">{p.product_summary}</span>
                       )}
                       <span>{p.head_count} hd</span>
                       <span>·</span>

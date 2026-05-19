@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import BreedSelect from "@/components/bulls/BreedSelect";
 import { toast } from "@/hooks/use-toast";
 import { useOrgRole } from "@/hooks/useOrgRole";
 
@@ -258,10 +259,10 @@ const BullCombobox = ({ value, catalogId, onChange }: BullComboboxProps) => {
             </div>
             <div>
               <Label>Breed</Label>
-              <Input
+              <BreedSelect
                 value={customForm.breed}
-                onChange={(e) => setCustomForm((p) => ({ ...p, breed: e.target.value }))}
-                placeholder="Optional"
+                onChange={(v) => setCustomForm((p) => ({ ...p, breed: v }))}
+                placeholder="Select breed (optional)"
               />
             </div>
             <div>

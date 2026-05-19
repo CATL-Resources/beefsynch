@@ -426,39 +426,24 @@ export default function BillingTab({
           <span className="text-2xl font-bold">{formatCurrency(grandTotal)}</span>
         </div>
 
-        {!readOnly && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground">CATL invoice #</label>
-              <Input
-                className="mt-1 h-8 text-sm"
-                defaultValue={billingRecord?.catl_invoice_number || ""}
-                onBlur={(e) => onSaveBillingField("catl_invoice_number", e.target.value || null)}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Select Sires invoice #</label>
-              <Input
-                className="mt-1 h-8 text-sm"
-                defaultValue={billingRecord?.select_sires_invoice_number || ""}
-                onBlur={(e) => onSaveBillingField("select_sires_invoice_number", e.target.value || null)}
-              />
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground">CATL invoice #</label>
+            <Input
+              className="mt-1 h-8 text-sm"
+              defaultValue={billingRecord?.catl_invoice_number || ""}
+              onBlur={(e) => onSaveBillingField("catl_invoice_number", e.target.value || null)}
+            />
           </div>
-        )}
-
-        {readOnly && billingRecord?.catl_invoice_number && (
-          <div className="text-sm">
-            <span className="text-muted-foreground">CATL:</span>{" "}
-            <span className="font-medium">{billingRecord.catl_invoice_number}</span>
+          <div>
+            <label className="text-xs text-muted-foreground">Select Sires invoice #</label>
+            <Input
+              className="mt-1 h-8 text-sm"
+              defaultValue={billingRecord?.select_sires_invoice_number || ""}
+              onBlur={(e) => onSaveBillingField("select_sires_invoice_number", e.target.value || null)}
+            />
           </div>
-        )}
-        {readOnly && billingRecord?.select_sires_invoice_number && (
-          <div className="text-sm">
-            <span className="text-muted-foreground">Select Sires:</span>{" "}
-            <span className="font-medium">{billingRecord.select_sires_invoice_number}</span>
-          </div>
-        )}
+        </div>
 
         {!readOnly && currentStatus !== "invoiced_closed" && (
           <>

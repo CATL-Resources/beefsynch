@@ -37,7 +37,8 @@ interface BullRow {
 export interface EditOrderData {
   id: string;
   customer_id: string | null;
-  order_date: string;
+  order_date: string | null;
+  order_status?: "not_ordered" | "ordered" | "received";
   fulfillment_status: string;
   billing_status: string;
   project_id: string | null;
@@ -55,9 +56,10 @@ interface NewOrderDialogProps {
   onOpenChange: (open: boolean) => void;
   editData?: EditOrderData | null;
   initialOrderType?: "customer" | "inventory";
+  initialCustomerId?: string | null;
 }
 
-const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewOrderDialogProps) => {
+const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initialCustomerId }: NewOrderDialogProps) => {
   const { orgId } = useOrgRole();
   const queryClient = useQueryClient();
   const isEditing = !!editData;
@@ -65,11 +67,12 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
 
   // Form state
   const [customerId, setCustomerId] = useState<string | null>(null);
-  const [orderDate, setOrderDate] = useState<Date>(new Date());
+  const [orderStatus, setOrderStatus] = useState<"not_ordered" | "ordered" | "received">("not_ordered");
+  const [orderDate, setOrderDate] = useState<Date | null>(null);
   const [neededBy, setNeededBy] = useState<Date | null>(null);
   const [neededByOpen, setNeededByOpen] = useState(false);
-  const [fulfillmentStatus, setFulfillmentStatus] = useState("pending");
   const [billingStatus, setBillingStatus] = useState("unbilled");
+  const [fulfillmentStatus, setFulfillmentStatus] = useState("pending");
   const [inventoryOwner, setInventoryOwner] = useState<"Select" | "CATL" | null>(null);
   const [notes, setNotes] = useState("");
   const [placedBy, setPlacedBy] = useState("");
@@ -112,10 +115,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
     if (!open) return;
     if (editData) {
       setCustomerId(editData.customer_id ?? null);
-      setOrderDate(new Date(editData.order_date + "T12:00:00"));
+      setOrderStatus(editData.order_status ?? (editData.order_date ? "received" : "not_ordered"));
+      setOrderDate(editData.order_date ? new Date(editData.order_date + "T12:00:00") : null);
       setNeededBy((editData as any).needed_by ? new Date((editData as any).needed_by + "T12:00:00") : null);
-      setFulfillmentStatus(editData.fulfillment_status);
       setBillingStatus(editData.billing_status);
+      setFulfillmentStatus(editData.fulfillment_status ?? "pending");
       setInventoryOwner((editData.inventory_owner as "Select" | "CATL" | null) ?? null);
       setSemenCompanyId(editData.semen_company_id ?? "none");
       setNotes(editData.notes ?? "");
@@ -142,11 +146,12 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
         setSupplyLines([]);
       }
     } else {
-      setCustomerId(null);
-      setOrderDate(new Date());
+      setCustomerId(initialCustomerId ?? null);
+      setOrderStatus("not_ordered");
+      setOrderDate(null);
       setNeededBy(null);
-      setFulfillmentStatus("pending");
       setBillingStatus("unbilled");
+      setFulfillmentStatus("pending");
       setInventoryOwner(null);
       setSemenCompanyId("none");
       setNotes("");
@@ -158,7 +163,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
       setNewCompanyName("");
     }
     setShowFulfillmentOverride(false);
-  }, [open, editData]);
+  }, [open, editData, initialCustomerId]);
 
   const addBullRow = () => setBulls((prev) => [...prev, { name: "", catalogId: null, naabCode: null, units: "" }]);
   const removeBullRow = (i: number) => setBulls((prev) => prev.filter((_, idx) => idx !== i));
@@ -177,6 +182,17 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
       toast({
         title: "Inventory owner required",
         description: "Select 'Select Sires' or 'CATL Resources' for inventory orders.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Inventory orders are POs to a supplier, so the supplier (semen company)
+    // is required. Mirrors the inventory_orders_require_company DB constraint.
+    if (orderType === "inventory" && (semenCompanyId === "none" || !semenCompanyId)) {
+      toast({
+        title: "Semen company required",
+        description: "Inventory orders must specify the supplier (semen company).",
         variant: "destructive",
       });
       return;
@@ -206,7 +222,8 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
       const orderPayload: any = {
         organization_id: orgId,
         customer_id: customerId || null,
-        order_date: format(orderDate, "yyyy-MM-dd"),
+        order_status: orderStatus,
+        order_date: orderStatus === "not_ordered" || !orderDate ? null : format(orderDate, "yyyy-MM-dd"),
         needed_by: neededBy ? format(neededBy, "yyyy-MM-dd") : null,
         fulfillment_status: isEditing ? fulfillmentStatus : "pending",
         billing_status: billingStatus,
@@ -216,9 +233,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
         notes: notes.trim() || null,
         placed_by: placedBy.trim() || null,
         order_type: orderType,
-        invoicing_company_id: semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
-          ? "630b12de-74bc-407a-8ee5-1ea17df18881"
-          : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
+        invoicing_company_id: orderType === "customer"
+          ? null
+          : semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
+            ? "630b12de-74bc-407a-8ee5-1ea17df18881"
+            : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
       };
 
       let orderId: string;
@@ -253,9 +272,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
           bull_catalog_id: b.catalogId,
           custom_bull_name: b.catalogId ? null : b.name.trim(),
           units: typeof b.units === "number" ? b.units : parseInt(String(b.units)) || 0,
-          invoicing_company_id: semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
-            ? "630b12de-74bc-407a-8ee5-1ea17df18881"
-            : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
+          invoicing_company_id: orderType === "customer"
+            ? null
+            : semenCompanyId === "630b12de-74bc-407a-8ee5-1ea17df18881"
+              ? "630b12de-74bc-407a-8ee5-1ea17df18881"
+              : "0c0df8b2-4f66-419f-8e3b-0970e3facad4",
         }));
         const { error: itemErr } = await supabase.from("semen_order_items").insert(rows);
         if (itemErr) throw itemErr;
@@ -346,86 +367,117 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType }: NewO
             </div>
           )}
 
-          {/* Semen Company */}
-          <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
-            <Label className="text-right text-sm">Company</Label>
-            <div>
-              <Select
-                value={semenCompanyId}
-                onValueChange={(val) => {
-                  if (val === "add_new") {
-                    setAddingCompany(true);
-                    setNewCompanyName("");
-                  } else {
-                    setSemenCompanyId(val);
-                    setAddingCompany(false);
-                  }
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                  <SelectItem value="add_new">+ Add New Company...</SelectItem>
-                </SelectContent>
-              </Select>
-              {addingCompany && (
-                <div className="flex items-center gap-2 mt-2">
-                  <Input
-                    value={newCompanyName}
-                    onChange={(e) => setNewCompanyName(e.target.value)}
-                    placeholder="Company name"
-                    className="flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    disabled={!newCompanyName.trim() || !orgId}
-                    onClick={async () => {
-                      if (!orgId) return;
-                      const { data, error } = await supabase
-                        .from("semen_companies")
-                        .insert({ name: newCompanyName.trim(), organization_id: orgId })
-                        .select("id, name")
-                        .single();
-                      if (error) {
-                        toast({ title: "Error", description: error.message, variant: "destructive" });
-                        return;
-                      }
-                      setCompanies((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
-                      setSemenCompanyId(data.id);
-                      setAddingCompany(false);
+          {/* Semen Company — inventory orders only. Customer orders defer
+              invoicing_company_id to the pack flow, which stamps it from the
+              source tank's owner_company_id. */}
+          {orderType === "inventory" && (
+            <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
+              <Label className="text-right text-sm">Company *</Label>
+              <div>
+                <Select
+                  value={semenCompanyId}
+                  onValueChange={(val) => {
+                    if (val === "add_new") {
+                      setAddingCompany(true);
                       setNewCompanyName("");
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-              )}
+                    } else {
+                      setSemenCompanyId(val);
+                      setAddingCompany(false);
+                    }
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {companies.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                    <SelectItem value="add_new">+ Add New Company...</SelectItem>
+                  </SelectContent>
+                </Select>
+                {addingCompany && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Input
+                      value={newCompanyName}
+                      onChange={(e) => setNewCompanyName(e.target.value)}
+                      placeholder="Company name"
+                      className="flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!newCompanyName.trim() || !orgId}
+                      onClick={async () => {
+                        if (!orgId) return;
+                        const { data, error } = await supabase
+                          .from("semen_companies")
+                          .insert({ name: newCompanyName.trim(), organization_id: orgId })
+                          .select("id, name")
+                          .single();
+                        if (error) {
+                          toast({ title: "Error", description: error.message, variant: "destructive" });
+                          return;
+                        }
+                        setCompanies((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+                        setSemenCompanyId(data.id);
+                        setAddingCompany(false);
+                        setNewCompanyName("");
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
+          )}
+
+          {/* Order Status */}
+          <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
+            <Label className="text-right text-sm">Order Status</Label>
+            <Select
+              value={orderStatus}
+              onValueChange={(v) => {
+                const next = v as "not_ordered" | "ordered" | "received";
+                setOrderStatus(next);
+                if (next === "not_ordered") {
+                  setOrderDate(null);
+                } else if (!orderDate) {
+                  // Pre-fill today on first transition into ordered/received
+                  setOrderDate(new Date());
+                }
+              }}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="not_ordered">Not Ordered</SelectItem>
+                <SelectItem value="ordered">Ordered</SelectItem>
+                <SelectItem value="received">Received</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Order Date */}
-          <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
-            <Label className="text-right text-sm">Order Date</Label>
-            <Popover open={dateOpen} onOpenChange={setDateOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className={cn("w-full justify-start text-left font-normal")}>
-                  {format(orderDate, "PPP")}
-                  <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={orderDate}
-                  onSelect={(d) => { if (d) setOrderDate(d); setDateOpen(false); }}
-                  className="p-3 pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
+          {/* Order Date — only when status is ordered or received */}
+          {orderStatus !== "not_ordered" && (
+            <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
+              <Label className="text-right text-sm">Order Date</Label>
+              <Popover open={dateOpen} onOpenChange={setDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal")}>
+                    {orderDate ? format(orderDate, "PPP") : <span className="text-muted-foreground">Pick a date</span>}
+                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={orderDate ?? undefined}
+                    onSelect={(d) => { if (d) setOrderDate(d); setDateOpen(false); }}
+                    className="p-3 pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
 
           {/* Needed By (optional) */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">

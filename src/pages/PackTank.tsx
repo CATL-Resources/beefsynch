@@ -13,7 +13,7 @@ import BackButton from "@/components/BackButton";
 import InventoryBullPicker from "@/components/InventoryBullPicker";
 import TeamMemberSelect from "@/components/TeamMemberSelect";
 import { supabase } from "@/integrations/supabase/client";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { generateTankLabelPdf } from "@/lib/generateTankLabelPdf";
@@ -128,7 +128,11 @@ const PackTank = () => {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [didPreselect, setDidPreselect] = useState(false);
 
-  // Fetch all active tanks (for project packs)
+  // Fetch all packable tanks. We intentionally do NOT filter out tanks with
+  // location_status = 'out' — multiple projects can be packed into the same
+  // field tank before it leaves, and once it does leave the first pack flips
+  // location_status to 'out'. The pack_tank RPC is fine being called again
+  // for an already-out tank.
   const { data: allActiveTanks = [] } = useQuery({
     queryKey: ["all_active_tanks", orgId],
     enabled: !!orgId,
@@ -137,11 +141,31 @@ const PackTank = () => {
         .from("tanks")
         .select("id, tank_name, tank_number, tank_type, nitrogen_status, location_status, customer_id")
         .eq("organization_id", orgId!)
-        .eq("location_status", "here")
         .eq("nitrogen_status", "wet")
         .order("tank_number");
       if (error) throw error;
       return data ?? [];
+    },
+  });
+
+  // Active pack count per field tank — shown as an indicator in the picker so
+  // users know a tank already carries packs but can still select it.
+  const { data: activePacksByTank = {} } = useQuery({
+    queryKey: ["active_packs_by_tank", orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tank_packs")
+        .select("field_tank_id, status")
+        .eq("organization_id", orgId!)
+        .not("status", "in", "(cancelled,unpacked)");
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      for (const row of (data ?? []) as { field_tank_id: string | null }[]) {
+        if (!row.field_tank_id) continue;
+        counts[row.field_tank_id] = (counts[row.field_tank_id] ?? 0) + 1;
+      }
+      return counts;
     },
   });
 
@@ -304,40 +328,38 @@ const PackTank = () => {
 
   const loadInventorySummary = async (projectId: string) => {
     if (!orgId) return;
-    const { data: projBulls, error } = await supabase
-      .from("project_bulls")
-      .select("bull_catalog_id, custom_bull_name, units, bulls_catalog(bull_name, naab_code)")
-      .eq("project_id", projectId);
+    const [{ data: proj }, { data: projBulls, error }] = await Promise.all([
+      supabase.from("projects").select("customer_id").eq("id", projectId).maybeSingle(),
+      supabase
+        .from("project_bulls")
+        .select("bull_catalog_id, custom_bull_name, units, semen_source, bulls_catalog(bull_name, naab_code)")
+        .eq("project_id", projectId),
+    ]);
     if (error || !projBulls) return;
+    const projCustomerId = (proj as any)?.customer_id ?? null;
 
     const summary: Record<string, { bullName: string; locations: { tankName: string; canister: string; units: number }[] }> = {};
 
     for (const pb of projBulls) {
       const bullName = getBullDisplayName(pb as any);
       const bullKey = (pb as any).bull_catalog_id || bullName;
+      const isCustomerSupplied = (pb as any).semen_source === "customer";
 
-      let invRows: any[] = [];
-      if ((pb as any).bull_catalog_id) {
-        const { data } = await supabase
-          .from("tank_inventory")
-          .select("canister, units, customer_id, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("bull_catalog_id", (pb as any).bull_catalog_id)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false });
-        invRows = data ?? [];
+      let q = supabase
+        .from("tank_inventory")
+        .select("canister, units, customer_id, tanks!inner(tank_name, tank_number)")
+        .eq("organization_id", orgId)
+        .gt("units", 0)
+        .order("units", { ascending: false });
+      if ((pb as any).bull_catalog_id) q = q.eq("bull_catalog_id", (pb as any).bull_catalog_id);
+      else q = q.eq("custom_bull_name", bullName);
+      if (isCustomerSupplied && projCustomerId) {
+        q = q.eq("customer_id", projCustomerId);
       } else {
-        const { data } = await supabase
-          .from("tank_inventory")
-          .select("canister, units, customer_id, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("custom_bull_name", bullName)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false });
-        invRows = data ?? [];
+        q = q.is("customer_id", null);
       }
+      const { data } = await q;
+      const invRows = data ?? [];
 
       summary[bullKey] = {
         bullName,
@@ -361,67 +383,57 @@ const PackTank = () => {
   const autoFillFromProject = async (projectId: string) => {
     if (!orgId) return;
 
-    const { data: projBulls, error } = await supabase
-      .from("project_bulls")
-      .select("bull_catalog_id, custom_bull_name, units, bulls_catalog(bull_name, naab_code)")
-      .eq("project_id", projectId);
+    const [{ data: proj }, { data: projBulls, error }] = await Promise.all([
+      supabase.from("projects").select("customer_id").eq("id", projectId).maybeSingle(),
+      supabase
+        .from("project_bulls")
+        .select("bull_catalog_id, custom_bull_name, units, semen_source, bulls_catalog(bull_name, naab_code)")
+        .eq("project_id", projectId),
+    ]);
 
     if (error || !projBulls || projBulls.length === 0) {
       toast({ title: "No bulls found", description: "This project has no bulls assigned.", variant: "destructive" });
       return;
     }
+    const projCustomerId = (proj as any)?.customer_id ?? null;
 
     const newLines: PackLine[] = [];
+
+    // Helper: pick the best source row for a bull, scoped to either company stock
+    // (semen_source = 'company') or the project customer's own stock (semen_source = 'customer').
+    const pickSource = async (
+      column: "bull_catalog_id" | "bull_code" | "custom_bull_name",
+      value: string,
+      ownership: "company" | "customer"
+    ) => {
+      let q = supabase
+        .from("tank_inventory")
+        .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
+        .eq("organization_id", orgId)
+        .eq(column, value)
+        .gt("units", 0)
+        .order("units", { ascending: false })
+        .limit(1);
+      if (ownership === "customer" && projCustomerId) {
+        q = q.eq("customer_id", projCustomerId);
+      } else {
+        q = q.is("customer_id", null);
+      }
+      const { data } = await q;
+      return data && data.length > 0 ? data[0] : null;
+    };
 
     for (const pb of projBulls) {
       const catalog = pb.bulls_catalog as any;
       const bullName = getBullDisplayName(pb as any);
       const bullCode = catalog?.naab_code || null;
       const bullCatalogId = pb.bull_catalog_id;
+      const ownership: "company" | "customer" = (pb as any).semen_source === "customer" ? "customer" : "company";
 
       let bestSource: any = null;
-
-      // Strategy 1: Match by bull_catalog_id (company-owned only — sourcing for a project pack)
-      if (bullCatalogId) {
-        const { data: invRows } = await supabase
-          .from("tank_inventory")
-          .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("bull_catalog_id", bullCatalogId)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false })
-          .limit(1);
-        if (invRows && invRows.length > 0) bestSource = invRows[0];
-      }
-
-      // Strategy 2: Match by bull_code / NAAB code (company-owned only)
-      if (!bestSource && bullCode) {
-        const { data: invRows } = await supabase
-          .from("tank_inventory")
-          .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("bull_code", bullCode)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false })
-          .limit(1);
-        if (invRows && invRows.length > 0) bestSource = invRows[0];
-      }
-
-      // Strategy 3: Match by custom_bull_name (company-owned only)
-      if (!bestSource) {
-        const { data: invRows } = await supabase
-          .from("tank_inventory")
-          .select("tank_id, canister, units, tanks!inner(tank_name, tank_number)")
-          .eq("organization_id", orgId)
-          .eq("custom_bull_name", bullName)
-          .is("customer_id", null)
-          .gt("units", 0)
-          .order("units", { ascending: false })
-          .limit(1);
-        if (invRows && invRows.length > 0) bestSource = invRows[0];
-      }
+      if (bullCatalogId) bestSource = await pickSource("bull_catalog_id", bullCatalogId, ownership);
+      if (!bestSource && bullCode) bestSource = await pickSource("bull_code", bullCode, ownership);
+      if (!bestSource) bestSource = await pickSource("custom_bull_name", bullName, ownership);
 
       newLines.push({
         key: crypto.randomUUID(),
@@ -891,6 +903,11 @@ const PackTank = () => {
                                 {packType === "project" && (
                                   <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">{TYPE_LABELS[t.tank_type] || t.tank_type}</Badge>
                                 )}
+                                {(activePacksByTank[t.id] ?? 0) > 0 && (
+                                  <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                    {activePacksByTank[t.id]} active pack{activePacksByTank[t.id] === 1 ? "" : "s"}
+                                  </Badge>
+                                )}
                               </CommandItem>
                             );
                           })}
@@ -908,6 +925,11 @@ const PackTank = () => {
                                   <Check className={cn("mr-2 h-4 w-4", selectedTankId === t.id ? "opacity-100" : "opacity-0")} />
                                   {label}
                                   <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">Customer</Badge>
+                                  {(activePacksByTank[t.id] ?? 0) > 0 && (
+                                    <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                      {activePacksByTank[t.id]} active pack{activePacksByTank[t.id] === 1 ? "" : "s"}
+                                    </Badge>
+                                  )}
                                 </CommandItem>
                               );
                             })}
@@ -1136,7 +1158,7 @@ const PackTank = () => {
                                   </span>
                                 </span>
                                 <span className="block text-xs text-muted-foreground truncate max-w-[280px]">
-                                  {(o.semen_order_items || []).map((i: any) => `${getBullDisplayName(i)} ×${i.units}`).join(", ") || "No items"}
+                                  {(o.semen_order_items || []).map((i: any) => `${getBullDisplayLabel(i)} ×${i.units}`).join(", ") || "No items"}
                                 </span>
                               </span>
                               <Badge variant="outline" className="text-[10px] px-1 py-0">{o.fulfillment_status}</Badge>
@@ -1295,7 +1317,7 @@ const PackTank = () => {
                                       <span className="text-muted-foreground ml-1 text-xs">{totalUnits} units</span>
                                     </span>
                                     <span className="block text-xs text-muted-foreground truncate max-w-[280px]">
-                                      {(o.semen_order_items || []).map((i: any) => `${getBullDisplayName(i)} ×${i.units}`).join(", ") || "No items"}
+                                      {(o.semen_order_items || []).map((i: any) => `${getBullDisplayLabel(i)} ×${i.units}`).join(", ") || "No items"}
                                     </span>
                                   </span>
                                   <Badge variant="outline" className="text-[10px] px-1 py-0">{o.fulfillment_status}</Badge>

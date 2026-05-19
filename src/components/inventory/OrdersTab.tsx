@@ -18,7 +18,7 @@ import { useOrgRole } from "@/hooks/useOrgRole";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { getBadgeClass } from "@/lib/badgeStyles";
-import { getBullDisplayName } from "@/lib/bullDisplay";
+import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import ReceivingTab from "@/components/inventory/ReceivingTab";
 
 type ChipFilter = "all" | "open" | "needs_invoice" | "done";
@@ -27,10 +27,15 @@ type Tier = "open" | "needs_invoice" | "done";
 const classify = (o: any): Tier | "cancelled" | null => {
   const f = o.fulfillment_status;
   const b = o.billing_status;
+  const isInventory = o.order_type === "inventory";
   const isInvoiced = b === "invoiced" || b === "paid";
   const isFulfilled = f === "fulfilled" || f === "ready_to_close";
 
   if (f === "cancelled") return "cancelled";
+
+  // Inventory orders (POs to suppliers) have no customer to bill. Fulfilled =
+  // done, full stop — they never enter the needs_invoice tier.
+  if (isInventory) return isFulfilled ? "done" : "open";
 
   // Done = fulfilled AND invoiced
   if (isFulfilled && isInvoiced) return "done";
@@ -190,8 +195,12 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
       );
       if (!customerMatch && !bullMatch) return false;
     }
-    if (dateFrom && isBefore(parseISO(o.order_date), dateFrom)) return false;
-    if (dateTo && isAfter(parseISO(o.order_date), dateTo)) return false;
+    if (o.order_date) {
+      if (dateFrom && isBefore(parseISO(o.order_date), dateFrom)) return false;
+      if (dateTo && isAfter(parseISO(o.order_date), dateTo)) return false;
+    } else if (dateFrom || dateTo) {
+      return false;
+    }
     return true;
   }), [scopedOrders, search, dateFrom, dateTo]);
 
@@ -224,7 +233,9 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   const totalUnits = useMemo(() => scopedOrders.reduce((sum: number, o: any) =>
     sum + (o.semen_order_items?.reduce((s: number, i: any) => s + (i.units || 0), 0) ?? 0), 0), [scopedOrders]);
   const pendingCount = scopedOrders.filter((o: any) => o.fulfillment_status !== "fulfilled").length;
-  const unbilledCount = scopedOrders.filter((o: any) => o.billing_status === "unbilled").length;
+  // Inventory orders are CATL's POs to suppliers — no customer to bill, so
+  // they shouldn't count toward the unbilled tally.
+  const unbilledCount = scopedOrders.filter((o: any) => o.billing_status === "unbilled" && o.order_type !== "inventory").length;
 
   const getBullSummary = (items: any[]) => {
     if (!items || items.length === 0) return "—";
@@ -266,13 +277,28 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                 <span className="text-xs text-muted-foreground">{order.semen_companies.name}</span>
               )}
               <span className="text-xs text-muted-foreground">·</span>
-              <span className="text-xs text-muted-foreground">{format(parseISO(order.order_date), "MMM d, yyyy")}</span>
+              <span className="text-xs text-muted-foreground">{order.order_date ? format(parseISO(order.order_date), "MMM d, yyyy") : "—"}</span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "capitalize text-[10px]",
+                  order.order_status === "received"
+                    ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                    : order.order_status === "ordered"
+                      ? "bg-blue-500/15 text-blue-700 border-blue-500/30"
+                      : "bg-muted text-muted-foreground",
+                )}
+              >
+                {(order.order_status || "not_ordered").replace(/_/g, " ")}
+              </Badge>
               <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderFulfillment', order.fulfillment_status))}>
                 {order.fulfillment_status?.replace(/_/g, " ")}
               </Badge>
-              <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderBilling', order.billing_status))}>
-                {order.billing_status}
-              </Badge>
+              {order.order_type !== "inventory" && (
+                <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderBilling', order.billing_status))}>
+                  {order.billing_status}
+                </Badge>
+              )}
               {order.order_type === "inventory" && receivedSet.has(order.id) && (
                 <Badge variant="outline" className="bg-green-600/20 text-green-400 border-green-600/30 text-[10px] gap-0.5">
                   <Check className="h-2.5 w-2.5" /> Received
@@ -289,7 +315,7 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
         {items.length > 0 && (
           <div className="space-y-1 pl-0.5">
             {items.map((item: any, idx: number) => {
-              const bullName = getBullDisplayName(item);
+              const bullName = getBullDisplayLabel(item);
               const units = item.units || 0;
               const shortage = isUnfulfilled ? getShortage(item.bull_catalog_id, units) : 0;
               return (
