@@ -1117,8 +1117,8 @@ const ProjectDetail = () => {
                           onClick={() => toggleSemenSource(b)}
                           className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 border transition-colors ${
                             b.semen_source === "customer"
-                              ? "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20"
-                              : "border-blue-500/40 bg-blue-500/10 text-blue-700 hover:bg-blue-500/20"
+                              ? "border-amber-400/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
+                              : "border-teal-400/40 bg-teal-500/10 text-teal-300 hover:bg-teal-500/20"
                           }`}
                           title="Click to toggle who provides the semen"
                         >
