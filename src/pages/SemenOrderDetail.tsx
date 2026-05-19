@@ -24,7 +24,6 @@ import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
 import ClickableRegNumber from "@/components/ClickableRegNumber";
-import { OrderShipmentReconciliation } from "@/components/inventory/OrderShipmentReconciliation";
 import { fulfillmentColors, billingColors } from "@/lib/badgeStyles";
 import { InvoiceOrderModal } from "@/components/orders/InvoiceOrderModal";
 import { MarkFulfilledModal } from "@/components/orders/MarkFulfilledModal";
@@ -108,6 +107,7 @@ const SemenOrderDetail = () => {
   const [packData, setPackData] = useState<any[]>([]);
   const [directSaleTxns, setDirectSaleTxns] = useState<any[]>([]);
   const [supplyItems, setSupplyItems] = useState<any[]>([]);
+  const [receiveLines, setReceiveLines] = useState<any[]>([]);
   const [billableByBull, setBillableByBull] = useState<Map<string, number>>(new Map());
   const [availability, setAvailability] = useState<
     Record<string, { total: number; locations: Array<{ tank: string; canister: string; units: number; owner: string }> }>
@@ -190,6 +190,20 @@ const SemenOrderDetail = () => {
         .eq("semen_order_id", id)
         .order("created_at");
       setSupplyItems(supplyData ?? []);
+
+      // Fetch received-into-tank transactions for "Where it went" column
+      const { data: rxLines } = await supabase
+        .from("inventory_transactions")
+        .select(`
+          id, units_change, created_at,
+          bull_catalog_id, bull_code, custom_bull_name,
+          tanks(tank_number, tank_name),
+          tank_inventory!inventory_transactions_inventory_item_id_fkey(canister, sub_canister)
+        `)
+        .eq("order_id", id)
+        .eq("transaction_type", "received")
+        .order("created_at", { ascending: true });
+      setReceiveLines((rxLines as any[]) ?? []);
 
       // Authoritative fulfilled/billable counts per bull (covers pack lines,
       // direct sales, customer pickups, withdrawals, reinventory adjustments).
@@ -420,6 +434,19 @@ const SemenOrderDetail = () => {
   const hasOpenItems = items.some(
     (i) => i.item_status === "pending" || i.item_status === "partially_received",
   );
+
+  // Group received transactions by bull so the Order Items table can show
+  // "Where it went" inline per line. Key by catalog id when present, otherwise
+  // by lowercased bull name, matching the OrderShipmentReconciliation logic
+  // we replaced.
+  const bullKey = (catalogId: string | null, name: string | null) =>
+    catalogId ? `cat:${catalogId}` : `name:${(name || "").toLowerCase().trim()}`;
+  const receivesByBull = new Map<string, typeof receiveLines>();
+  for (const r of receiveLines) {
+    const k = bullKey(r.bull_catalog_id, r.custom_bull_name || r.bull_code);
+    if (!receivesByBull.has(k)) receivesByBull.set(k, []);
+    receivesByBull.get(k)!.push(r);
+  }
 
   const handleCloseOrder = async () => {
     if (!order) return;
@@ -829,8 +856,7 @@ const SemenOrderDetail = () => {
                         <TableHead>NAAB</TableHead>
                         <TableHead className="text-right">Ordered</TableHead>
                         <TableHead className="text-right">Received</TableHead>
-                        <TableHead className="text-right">Pending</TableHead>
-                        <TableHead>Status</TableHead>
+                        <TableHead>Where it went</TableHead>
                         <TableHead className="w-32"></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -841,15 +867,14 @@ const SemenOrderDetail = () => {
                         const pending = Math.max(0, ordered - received);
                         const status = item.item_status || "pending";
                         const isCancelled = status === "cancelled";
-                        const statusBadge =
-                          status === "received"
-                            ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
-                            : status === "partially_received"
-                              ? "bg-amber-500/15 text-amber-700 border-amber-500/30"
-                              : status === "cancelled"
-                                ? "bg-red-500/15 text-red-700 border-red-500/30"
-                                : "bg-muted text-muted-foreground";
                         const canCancel = status === "pending" || status === "partially_received";
+                        const receivedClass =
+                          received === 0
+                            ? "text-muted-foreground"
+                            : received < ordered
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-emerald-600 dark:text-emerald-400";
+                        const lines = receivesByBull.get(bullKey(item.bull_catalog_id, item.custom_bull_name)) ?? [];
                         return (
                           <TableRow key={item.id} className={isCancelled ? "opacity-50" : ""}>
                             <TableCell className="font-medium">
@@ -859,12 +884,27 @@ const SemenOrderDetail = () => {
                               {item.bulls_catalog?.naab_code ?? "—"}
                             </TableCell>
                             <TableCell className="text-right">{ordered}</TableCell>
-                            <TableCell className="text-right">{received}</TableCell>
-                            <TableCell className="text-right">{pending}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={cn("capitalize text-xs", statusBadge)}>
-                                {status.replace(/_/g, " ")}
-                              </Badge>
+                            <TableCell className={cn("text-right font-medium", receivedClass)}>{received}</TableCell>
+                            <TableCell className="text-xs">
+                              {lines.length === 0 ? (
+                                <span className="text-muted-foreground italic">Nothing received yet</span>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  {lines.map((l) => {
+                                    const tank = l.tanks?.tank_name || (l.tanks?.tank_number ? `Tank #${l.tanks.tank_number}` : null);
+                                    const can = l.tank_inventory?.canister
+                                      ? `can ${l.tank_inventory.canister}${l.tank_inventory.sub_canister ? `-${l.tank_inventory.sub_canister}` : ""}`
+                                      : null;
+                                    return (
+                                      <div key={l.id} className="text-muted-foreground">
+                                        {tank ? <span className="text-foreground">{tank}</span> : <span>(deleted tank)</span>}
+                                        {can && <span> / {can}</span>}
+                                        <span> — {l.units_change}u</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </TableCell>
                             <TableCell className="text-right">
                               {canCancel && (
@@ -1222,10 +1262,6 @@ const SemenOrderDetail = () => {
           </Card>
         )}
 
-        {/* Reconciliation card only applies to inventory orders (POs from semen companies).
-            Customer orders are filled by packing from existing tank inventory, which is
-            already shown in the "Packed for this Order" card above. */}
-        {id && order?.order_type === "inventory" && <OrderShipmentReconciliation orderId={id} />}
       </div>
 
       {/* Print-only billing sheet. Hidden on screen, revealed by window.print() via @media print rules in index.css. */}
