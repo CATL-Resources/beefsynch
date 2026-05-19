@@ -26,6 +26,7 @@ import { getBullDisplayName } from "@/lib/bullDisplay";
 import BillingTab from "@/components/billing/BillingTab";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import PackForProjectDialog from "@/components/billing/PackForProjectDialog";
+import EditPackDialog from "@/components/billing/EditPackDialog";
 
 import {
   BillingProduct, ProductLine, SessionLine, SessionInventoryLine, SemenLine, LaborLine,
@@ -59,6 +60,7 @@ const ProjectBilling = () => {
 
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [packDialogOpen, setPackDialogOpen] = useState(false);
+  const [editPackOpen, setEditPackOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1122,7 +1124,7 @@ const ProjectBilling = () => {
                     </DropdownMenuItem>
                   )}
                   {hasPack && packStatus === "packed" && (
-                    <DropdownMenuItem onClick={() => toast({ title: "Coming soon", description: "Edit pack flow lands in a follow-up." })}>
+                    <DropdownMenuItem onClick={() => setEditPackOpen(true)}>
                       <Edit className="h-4 w-4 mr-2" /> Edit pack
                     </DropdownMenuItem>
                   )}
@@ -1439,6 +1441,16 @@ const ProjectBilling = () => {
           projectName={project?.name ?? null}
           organizationId={orgId}
           onPackComplete={() => loadData()}
+        />
+      )}
+      {firstPack?.id && orgId && firstPack?.field_tank_id && (
+        <EditPackDialog
+          open={editPackOpen}
+          onOpenChange={setEditPackOpen}
+          packId={firstPack.id}
+          organizationId={orgId}
+          fieldTankId={firstPack.field_tank_id}
+          onEditComplete={() => loadData()}
         />
       )}
       <AppFooter />
