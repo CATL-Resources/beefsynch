@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { format, parseISO } from "date-fns";
 import { Plus, Trash2, Pencil, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +29,41 @@ interface BreedingSectionProps {
   onSaveWorksheetCell: (rowId: string, field: "start_units" | "end_units" | "blown_units", value: number | null) => void;
   onSetSessionInventory: React.Dispatch<React.SetStateAction<SessionInventoryLine[]>>;
   onTotalUsedChanged: (totalUsed: number, bullUsed: Map<string, number>, bullBlown: Map<string, number>) => void;
+}
+
+// Small borderless inline text input that commits on blur. Used in the
+// session card header for label/time-of-day so they read like editable text.
+function InlineHeaderText({
+  value, onCommit, placeholder, className, readOnly, ariaLabel,
+}: {
+  value: string | null | undefined;
+  onCommit: (next: string | null) => void;
+  placeholder: string;
+  className?: string;
+  readOnly?: boolean;
+  ariaLabel: string;
+}) {
+  const [local, setLocal] = useState(value ?? "");
+  useEffect(() => { setLocal(value ?? ""); }, [value]);
+  return (
+    <input
+      type="text"
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={local}
+      readOnly={readOnly}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        const next = local.trim() || null;
+        if (next !== (value ?? null)) onCommit(next);
+      }}
+      className={
+        "bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:outline-none px-1 py-0.5 text-sm rounded-none " +
+        (className ?? "")
+      }
+    />
+  );
 }
 
 export default function BreedingSection({
@@ -211,14 +245,45 @@ export default function BreedingSection({
 
         return (
           <Card key={sessionId} className="overflow-hidden">
-            <button type="button" onClick={() => toggleExpand(sessionId)}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors">
-              {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
-              <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium">{format(parseISO(s.session_date), "MMM d, yyyy")}</span>
+            <div className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+              <button
+                type="button"
+                onClick={() => toggleExpand(sessionId)}
+                aria-label={isExpanded ? "Collapse session" : "Expand session"}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </button>
+              <div className="flex-1 min-w-0 flex items-center gap-1 flex-wrap">
+                <input
+                  type="date"
+                  aria-label="Session date"
+                  value={s.session_date || ""}
+                  readOnly={readOnly}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) onSaveSession(sessionIdx, { session_date: v });
+                  }}
+                  className="bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:outline-none px-1 py-0.5 text-sm font-medium rounded-none w-[140px]"
+                />
                 <span className="text-sm text-muted-foreground">·</span>
-                <span className="text-sm">{s.session_label || "Breeding"}</span>
+                <InlineHeaderText
+                  value={s.session_label}
+                  placeholder="Breeding"
+                  ariaLabel="Session label"
+                  readOnly={readOnly}
+                  className="w-[110px]"
+                  onCommit={(v) => onSaveSession(sessionIdx, { session_label: v })}
+                />
+                <InlineHeaderText
+                  value={s.time_of_day}
+                  placeholder="Time"
+                  ariaLabel="Time of day"
+                  readOnly={readOnly}
+                  className="w-[80px] text-muted-foreground"
+                  onCommit={(v) => onSaveSession(sessionIdx, { time_of_day: v } as Partial<SessionLine>)}
+                />
                 <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-primary/40 text-primary">
                   Breeding {si + 1}
                 </Badge>
@@ -226,7 +291,7 @@ export default function BreedingSection({
               <div className="text-sm font-semibold tabular-nums shrink-0">
                 {sessionUsed > 0 ? `${sessionUsed} hd` : "—"}
               </div>
-            </button>
+            </div>
 
             {isExpanded && (
               <CardContent className="border-t pt-4 space-y-4">
