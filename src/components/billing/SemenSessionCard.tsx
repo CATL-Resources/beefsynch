@@ -1,5 +1,6 @@
 import { format, parseISO } from "date-fns";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/hooks/use-toast";
 
 export type InventoryRow = {
   id: string;
@@ -98,7 +99,15 @@ export default function SemenSessionCard({
                     defaultValue={r.start_units ?? ""}
                     placeholder="—"
                     onBlur={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      const raw = e.target.value;
+                      const v = raw === "" ? null : Number(raw);
+                      if (v != null && (Number.isNaN(v) || v < 0)) {
+                        toast({ title: "Start count can't be negative", variant: "destructive" });
+                        e.target.classList.add("border-destructive");
+                        e.target.value = r.start_units == null ? "" : String(r.start_units);
+                        setTimeout(() => e.target.classList.remove("border-destructive"), 1500);
+                        return;
+                      }
                       if (v === r.start_units) return;
                       onCellChange(r.id, "start_units", v);
                     }}
@@ -111,7 +120,15 @@ export default function SemenSessionCard({
                     defaultValue={r.end_units ?? ""}
                     placeholder="—"
                     onBlur={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      const raw = e.target.value;
+                      const v = raw === "" ? null : Number(raw);
+                      if (v != null && (Number.isNaN(v) || v < 0)) {
+                        toast({ title: "End count can't be negative", variant: "destructive" });
+                        e.target.classList.add("border-destructive");
+                        e.target.value = r.end_units == null ? "" : String(r.end_units);
+                        setTimeout(() => e.target.classList.remove("border-destructive"), 1500);
+                        return;
+                      }
                       if (v === r.end_units) return;
                       onCellChange(r.id, "end_units", v);
                     }}
@@ -127,7 +144,15 @@ export default function SemenSessionCard({
                     defaultValue={r.blown_units ?? ""}
                     placeholder="—"
                     onBlur={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      const raw = e.target.value;
+                      const v = raw === "" ? null : Number(raw);
+                      if (v != null && (Number.isNaN(v) || v < 0)) {
+                        toast({ title: "Blown can't be negative", variant: "destructive" });
+                        e.target.classList.add("border-destructive");
+                        e.target.value = r.blown_units == null ? "" : String(r.blown_units);
+                        setTimeout(() => e.target.classList.remove("border-destructive"), 1500);
+                        return;
+                      }
                       if (v === r.blown_units) return;
                       onCellChange(r.id, "blown_units", v);
                     }}

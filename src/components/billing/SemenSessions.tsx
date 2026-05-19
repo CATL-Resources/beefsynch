@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Plus, Package } from "lucide-react";
@@ -216,6 +216,59 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
     refetchSessions();
     refetchInventory();
   };
+
+  // Pack lines indexed by (bull_catalog_id|bull_name) + canister — used both
+  // for Session 1 self-heal and the addSession prefill.
+  const { data: packLineList = [] } = useQuery({
+    queryKey: ["semen_sessions_packlines_v2", projectId],
+    enabled: !!projectId,
+    queryFn: async () => {
+      const { data: links } = await supabase
+        .from("tank_pack_projects")
+        .select("tank_pack_id")
+        .eq("project_id", projectId);
+      const ids = (links ?? []).map((l: any) => l.tank_pack_id).filter(Boolean);
+      if (ids.length === 0) return [] as any[];
+      const { data } = await supabase
+        .from("tank_pack_lines")
+        .select("bull_catalog_id, bull_name, bull_code, field_canister, units")
+        .in("tank_pack_id", ids);
+      return data ?? [];
+    },
+  });
+
+  // One-time self-heal: pre-#82 code path may have written start_units for
+  // Session 1 rows that don't match the pack line by bull + canister. If
+  // such a row exists AND the user clearly hasn't touched it yet (no end /
+  // blown entered), align start_units to the matching pack line's units.
+  useEffect(() => {
+    if (sessions.length === 0 || inventory.length === 0 || packLineList.length === 0) return;
+    const firstSession = sessions[0];
+    const packByKey = new Map<string, number>();
+    for (const pl of packLineList) {
+      const k = `${pl.bull_catalog_id || pl.bull_name}|${pl.field_canister || ""}`;
+      packByKey.set(k, (packByKey.get(k) ?? 0) + (pl.units ?? 0));
+    }
+    const toFix = inventory.filter((r) => {
+      if (r.session_id !== firstSession.id) return false;
+      if (r.end_units != null || r.blown_units != null) return false; // untouched only
+      const k = `${r.bull_catalog_id || r.bull_name}|${r.canister || ""}`;
+      const expected = packByKey.get(k);
+      return expected != null && expected !== (r.start_units ?? 0);
+    });
+    if (toFix.length === 0) return;
+    Promise.all(
+      toFix.map((r) => {
+        const k = `${r.bull_catalog_id || r.bull_name}|${r.canister || ""}`;
+        const expected = packByKey.get(k);
+        return supabase
+          .from("project_billing_session_inventory")
+          .update({ start_units: expected })
+          .eq("id", r.id);
+      }),
+    ).then(() => refetchInventory());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions.length, inventory.length, packLineList.length]);
 
   // Only sessions after the last PGF event count as breeding sessions.
   // Existing pre-PGF session rows are left in the DB but hidden here.
