@@ -24,6 +24,7 @@ import { generateBillingSheetPdf } from "@/lib/generateBillingSheetPdf";
 import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
 import BillingTab from "@/components/billing/BillingTab";
+import BreedingSection from "@/components/billing/BreedingSection";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import PackForProjectDialog from "@/components/billing/PackForProjectDialog";
 import EditPackDialog from "@/components/billing/EditPackDialog";
@@ -1288,156 +1289,58 @@ const ProjectBilling = () => {
 
         <div className={hasPack ? "" : "opacity-40 pointer-events-none"}>
 
-        {/* ── Breeding Sessions ── */}
-        {(() => {
-          const breedingSessions = sessions.filter(s => {
+        {/* ── Breeding Sessions worksheet ── */}
+        <BreedingSection
+          sessions={sessions.filter((s) => {
+            if (s.session_type === "field_session") return true;
             const label = (s.session_label || "").toLowerCase();
-            return label.includes("breed") || label.includes("ai ") || label === "ai" || label.includes("tai");
-          });
-          const headTotal = breedingSessions.reduce((sum, s) => sum + (s.head_count || 0), 0);
-
-          return (
-            <section className="space-y-3">
-              <h2 className="text-lg font-semibold">Breeding sessions</h2>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium w-[110px]">Date</th>
-                      <th className="text-left px-3 py-2 font-medium w-[120px]">Session</th>
-                      <th className="text-right px-3 py-2 font-medium w-[80px]">Head</th>
-                      <th className="text-left px-3 py-2 font-medium">Notes</th>
-                      {!readOnly && <th className="w-[40px]" />}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {breedingSessions.length === 0 ? (
-                      <tr>
-                        <td colSpan={readOnly ? 4 : 5} className="px-3 py-4 text-center text-muted-foreground">
-                          No breeding sessions yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      breedingSessions.map((s) => {
-                        const sessionIdx = sessions.findIndex(x => x.id === s.id);
-                        return (
-                          <tr key={s.id} className="border-t border-border/40">
-                            <td className="px-3 py-2">
-                              {readOnly ? (
-                                <span>{s.session_date ? format(parseISO(s.session_date), "MMM d") : "—"}</span>
-                              ) : (
-                                <Input
-                                  type="date"
-                                  className="h-7 w-[130px] text-sm"
-                                  key={`date-${s.id}`}
-                                  defaultValue={s.session_date ?? ""}
-                                  onBlur={(e) => {
-                                    const val = e.target.value;
-                                    if (!val) return;
-                                    // Guard against partial dates the date picker
-                                    // emits while the user is still typing the
-                                    // year (e.g. 0002-05-18).
-                                    const year = parseInt(val.split("-")[0], 10);
-                                    if (isNaN(year) || year < 2020 || year > 2099) return;
-                                    if (val === s.session_date) return;
-                                    if (s.id) saveSessionField(s.id, "session_date", val);
-                                  }}
-                                />
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              {readOnly ? (
-                                <span>{s.session_label || "Breeding"}</span>
-                              ) : (
-                                <Input
-                                  className="h-7 w-[120px] text-sm"
-                                  key={`label-${s.id}`}
-                                  defaultValue={s.session_label ?? "Breeding"}
-                                  onBlur={(e) => {
-                                    const val = e.target.value.trim();
-                                    const prev = s.session_label || "Breeding";
-                                    if (!val) {
-                                      e.target.value = prev;
-                                      return;
-                                    }
-                                    if (val === prev) return;
-                                    if (s.id) saveSessionField(s.id, "session_label", val);
-                                  }}
-                                />
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              {readOnly ? (
-                                <span>{s.head_count || "—"}</span>
-                              ) : (
-                                <Input
-                                  type="number"
-                                  className="h-7 w-[64px] text-right text-sm ml-auto"
-                                  key={`head-${s.id}`}
-                                  defaultValue={s.head_count ?? ""}
-                                  onBlur={(e) => {
-                                    const val = e.target.value === "" ? null : Number(e.target.value);
-                                    if (val === s.head_count) return;
-                                    if (s.id) saveSessionField(s.id, "head_count", val);
-                                  }}
-                                />
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              {readOnly ? (
-                                <span className="text-muted-foreground">{s.notes || "—"}</span>
-                              ) : (
-                                <Input
-                                  className="h-7 text-sm"
-                                  key={`notes-${s.id}`}
-                                  defaultValue={s.notes ?? ""}
-                                  placeholder="Notes…"
-                                  onBlur={(e) => {
-                                    const val = e.target.value || null;
-                                    if (val === s.notes) return;
-                                    if (s.id) saveSessionField(s.id, "notes", val);
-                                  }}
-                                />
-                              )}
-                            </td>
-                            {!readOnly && (
-                              <td className="px-3 py-2 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => removeSession(sessionIdx)}
-                                  className="text-muted-foreground hover:text-destructive transition-colors"
-                                  aria-label="Remove session"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })
-                    )}
-                    {breedingSessions.length > 0 && (
-                      <tr className="border-t border-border bg-muted/20 font-medium">
-                        <td className="px-3 py-2" colSpan={2}>Total</td>
-                        <td className="px-3 py-2 text-right">{headTotal}</td>
-                        <td className="px-3 py-2" colSpan={readOnly ? 1 : 2} />
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {!readOnly && (
-                <button
-                  type="button"
-                  onClick={addBreedingSession}
-                  className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add session
-                </button>
-              )}
-            </section>
-          );
-        })()}
+            return label.includes("breed") || label.includes("ai") || label.includes("tai");
+          })}
+          allSessions={sessions}
+          productLines={productLines}
+          sessionInventory={sessionInventory}
+          semenLines={semenLines}
+          billingProducts={billingProducts}
+          readOnly={readOnly}
+          onSaveSession={saveSessionLine}
+          onSaveProduct={saveProductLine}
+          onSwapProduct={swapProduct}
+          onRemoveProduct={deleteAdditionalProductLine}
+          onAddProductToSession={addProductToSession}
+          onAddBreedingSession={addBreedingSession}
+          onRemoveSession={removeSession}
+          onSaveWorksheetCell={saveWorksheetCell}
+          onSetSessionInventory={setSessionInventory}
+          onTotalUsedChanged={(_totalUsed, bullUsed, bullBlown) => {
+            // Propagate per-bull usage from the worksheet into the semen
+            // billable summary. Only writes the rows that actually changed.
+            const updates: Array<{ id: string; units_billable: number; units_blown: number; line_total: number }> = [];
+            const updated = semenLines.map((sl) => {
+              const key = sl.bull_catalog_id || sl.bull_name;
+              const used = bullUsed.get(key) ?? 0;
+              const blown = bullBlown.get(key) ?? 0;
+              const billable = Math.max(0, used - blown);
+              const line_total = billable * (sl.unit_price ?? 0);
+              const changed =
+                sl.units_billable !== billable ||
+                sl.units_blown !== blown ||
+                sl.line_total !== line_total;
+              if (changed && sl.id) {
+                updates.push({ id: sl.id, units_billable: billable, units_blown: blown, line_total });
+                return { ...sl, units_billable: billable, units_blown: blown, line_total };
+              }
+              return sl;
+            });
+            if (updates.length === 0) return;
+            setSemenLines(updated);
+            for (const u of updates) {
+              supabase
+                .from("project_billing_semen")
+                .update({ units_billable: u.units_billable, units_blown: u.units_blown, line_total: u.line_total })
+                .eq("id", u.id);
+            }
+          }}
+        />
 
         {/* ── Billing sheet ── */}
         <fieldset disabled={readOnly} className="contents [&_button]:disabled:pointer-events-auto">
