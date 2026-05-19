@@ -99,6 +99,8 @@ export function generateWorksheetPdf(
     /** Per-canister rows from tank_pack_lines — authoritative for packed amounts */
     packLines?: PackLineRow[];
     laborEntries?: { description: string; labor_dates: string | null }[];
+    unpackLines?: { bull_name: string; bull_code: string | null; units_returned: number; destination_label: string | null }[];
+    packStatus?: string | null;
   },
 ) {
   const semenLines = extra?.semenLines ?? [];
@@ -106,6 +108,9 @@ export function generateWorksheetPdf(
   const sessionDetails = extra?.sessionDetails ?? [];
   const packLines = extra?.packLines ?? [];
   const laborEntries = extra?.laborEntries ?? [];
+  const unpackLines = extra?.unpackLines ?? [];
+  const packStatus = extra?.packStatus ?? packInfo?.status ?? null;
+  const isUnpacked = packStatus === "unpacked" || packStatus === "tank_returned";
 
   // Filter events
   const filteredEvents = events.filter(
@@ -439,63 +444,45 @@ export function generateWorksheetPdf(
   }
   y2 += 6;
 
-  /* -- Total packed per bull -- */
+  /* -- Packed summary (Bull | NAAB | Field can | Units packed) -- */
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text("Total packed per bull", m, y2);
-  y2 += 4;
+  doc.text("Packed summary", m, y2);
+  y2 += 2;
 
-  // Build summaries from pack lines (authoritative) grouped by bull
-  const bullPackedMap = new Map<string, { label: string; packed: number }>();
-  for (const pl of packLines) {
-    const key = pl.bull_name;
-    const existing = bullPackedMap.get(key);
-    if (existing) {
-      existing.packed += pl.packed;
-    } else {
-      bullPackedMap.set(key, { label: bullLabel(pl.bull_name, pl.bull_code), packed: pl.packed });
-    }
-  }
-  // Fallback to semenLines if no pack lines
-  if (bullPackedMap.size === 0 && semenLines.length > 0) {
-    for (const sl of semenLines) {
-      if ((sl.units_packed ?? 0) > 0) {
-        bullPackedMap.set(sl.bull_name, { label: bullLabel(sl.bull_name, sl.bull_code), packed: sl.units_packed ?? 0 });
-      }
-    }
-  }
+  const packedSummaryBody = packLines
+    .slice()
+    .sort((a, b) =>
+      a.bull_name.localeCompare(b.bull_name) ||
+      a.canister.localeCompare(b.canister, undefined, { numeric: true })
+    )
+    .map((pl) => [
+      pl.bull_name || "",
+      pl.bull_code || "",
+      pl.canister || "",
+      { content: String(pl.packed), styles: { halign: "right" as const } },
+    ]);
 
-  const bullSummaries = Array.from(bullPackedMap.values());
-
-  // Draw bull summary pills
-  doc.setFontSize(9);
-  let pillX = m;
-  for (const bs of bullSummaries) {
-    if (!bs.label) continue;
-    const nameText = bs.label + "  ";
-    const packedText = String(bs.packed);
-    const nameW = doc.getTextWidth(nameText);
-    const packedW = doc.getTextWidth(packedText);
-    const pillW = nameW + packedW + 6;
-    const pillH = 6;
-    doc.setDrawColor(120);
-    doc.setLineWidth(0.2);
-    doc.roundedRect(pillX, y2, pillW, pillH, 1.5, 1.5);
-    doc.setFont("helvetica", "normal");
-    doc.text(nameText, pillX + 3, y2 + 4.2);
-    doc.setFont("helvetica", "bold");
-    doc.text(packedText, pillX + 3 + nameW, y2 + 4.2);
-    pillX += pillW + 4;
-    if (pillX > pw2 - 100) { pillX = m; y2 += pillH + 2; }
-  }
-  if (bullSummaries.length === 0) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(120);
-    doc.text("No bulls packed yet", m, y2 + 4);
-    doc.setTextColor(0);
-  }
-  y2 += 10;
+  autoTable(doc, {
+    startY: y2 + 2,
+    margin: { left: m, right: m },
+    head: [[
+      "Bull",
+      "NAAB",
+      "Field can",
+      { content: "Units packed", styles: { halign: "right" as const } },
+    ]],
+    body: packedSummaryBody.length > 0 ? packedSummaryBody : [["No bulls packed yet", "", "", ""]],
+    styles: { fontSize: 9, cellPadding: 1.8, lineColor: [60, 60, 60], lineWidth: 0.15 },
+    headStyles: { ...getStandardHeadStylesDark(), fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 60 },
+      1: { cellWidth: 30 },
+      2: { cellWidth: 25 },
+      3: { cellWidth: 28 },
+    },
+  });
+  y2 = (doc as any).lastAutoTable.finalY + 6;
 
   /* -- Session detail grid -- */
   doc.setFont("helvetica", "bold");
@@ -606,6 +593,60 @@ export function generateWorksheetPdf(
     columnStyles: colStyles,
   });
   y2 = (doc as any).lastAutoTable.finalY + 6;
+
+  /* -- Returned summary (only when unpacked) -- */
+  if (isUnpacked && unpackLines.length > 0) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Returned summary", m, y2);
+    y2 += 2;
+
+    // Roll up by bull so split returns to the same destination still show
+    // as one row per (bull, destination).
+    const grouped = new Map<string, { bullLabel: string; returned: number; destination: string }>();
+    for (const ul of unpackLines) {
+      const key = `${ul.bull_name}|${ul.destination_label ?? ""}`;
+      const entry = grouped.get(key);
+      if (entry) {
+        entry.returned += ul.units_returned ?? 0;
+      } else {
+        grouped.set(key, {
+          bullLabel: bullLabel(ul.bull_name, ul.bull_code),
+          returned: ul.units_returned ?? 0,
+          destination: ul.destination_label ?? "—",
+        });
+      }
+    }
+    const returnedBody = Array.from(grouped.values())
+      .filter((r) => r.returned > 0)
+      .sort((a, b) => a.bullLabel.localeCompare(b.bullLabel))
+      .map((r) => [
+        r.bullLabel,
+        { content: String(r.returned), styles: { halign: "right" as const } },
+        r.destination,
+      ]);
+
+    if (returnedBody.length > 0) {
+      autoTable(doc, {
+        startY: y2 + 2,
+        margin: { left: m, right: m },
+        head: [[
+          "Bull",
+          { content: "Remaining", styles: { halign: "right" as const } },
+          "Returned to",
+        ]],
+        body: returnedBody,
+        styles: { fontSize: 9, cellPadding: 1.8, lineColor: [60, 60, 60], lineWidth: 0.15 },
+        headStyles: { ...getStandardHeadStylesDark(), fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 80 },
+          1: { cellWidth: 28 },
+          2: { cellWidth: "auto" },
+        },
+      });
+      y2 = (doc as any).lastAutoTable.finalY + 6;
+    }
+  }
 
   /* -- Notes -- */
   const notesAvailable = ph2 - y2 - 10;

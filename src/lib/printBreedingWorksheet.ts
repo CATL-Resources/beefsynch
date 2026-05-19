@@ -41,6 +41,7 @@ export async function printBreedingWorksheet(project: any) {
     .find(Boolean) || null;
 
   let packLineRows: { bull_name: string; bull_code: string | null; canister: string; packed: number }[] = [];
+  let unpackLineRows: { bull_name: string; bull_code: string | null; units_returned: number; destination_label: string | null }[] = [];
   if (firstPack?.id) {
     const { data: plData } = await supabase
       .from("tank_pack_lines")
@@ -55,6 +56,28 @@ export async function printBreedingWorksheet(project: any) {
         canister: pl.field_canister || "",
         packed: pl.units ?? 0,
       }));
+    }
+
+    // Returned-summary data: only relevant when unpacked, but it's cheap to
+    // fetch unconditionally and let the PDF generator gate on pack status.
+    const { data: unpackData } = await supabase
+      .from("tank_unpack_lines")
+      .select("bull_name, bull_code, units_returned, destination_canister, tanks:destination_tank_id(tank_name, tank_number)")
+      .eq("tank_pack_id", firstPack.id);
+    if (unpackData) {
+      unpackLineRows = unpackData.map((ul: any) => {
+        const tank = ul.tanks;
+        const tankPart = tank
+          ? (tank.tank_name ? `${tank.tank_name} (#${tank.tank_number})` : `Tank #${tank.tank_number}`)
+          : null;
+        const canPart = ul.destination_canister ? ` / can ${ul.destination_canister}` : "";
+        return {
+          bull_name: ul.bull_name || "",
+          bull_code: ul.bull_code || null,
+          units_returned: ul.units_returned ?? 0,
+          destination_label: tankPart ? `${tankPart}${canPart}` : null,
+        };
+      });
     }
   }
 
@@ -164,5 +187,7 @@ export async function printBreedingWorksheet(project: any) {
     sessionDetails: sessionDetailRows,
     packLines: packLineRows,
     laborEntries,
+    unpackLines: unpackLineRows,
+    packStatus: firstPack?.status ?? null,
   });
 }
