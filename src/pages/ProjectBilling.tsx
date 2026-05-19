@@ -4,12 +4,20 @@ import { supabase } from "@/integrations/supabase/client";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { toast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Printer, ClipboardList, Check, Package, PackageOpen, Trash2, Plus, Pencil } from "lucide-react";
+import { ArrowLeft, Printer, ClipboardList, Check, Package, PackageOpen, Trash2, Plus, Pencil, MoreVertical, Settings, CheckCircle, Download, Edit, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { generateBillingSheetPdf } from "@/lib/generateBillingSheetPdf";
 import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
@@ -47,6 +55,8 @@ const ProjectBilling = () => {
   const [laborLines, setLaborLines] = useState<LaborLine[]>([]);
 
   const [editProjectOpen, setEditProjectOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
   const [saved, setSaved] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -916,6 +926,19 @@ const ProjectBilling = () => {
     toast({ title: "Breeding worksheet downloaded" });
   }
 
+  async function handleDeleteProject() {
+    if (!projectId) return;
+    setDeletingProject(true);
+    const { error } = await supabase.from("projects").delete().eq("id", projectId);
+    setDeletingProject(false);
+    if (error) {
+      toast({ title: "Could not delete project", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Project deleted", description: `${project?.name ?? "Project"} has been removed.` });
+    navigate("/operations");
+  }
+
   /* ── Auto-update AI Service qty + semen line used values from breeding ── */
   const lastTotalUsedRef = useRef<number>(0);
   function handleTotalUsedChanged(totalUsed: number, bullUsed: Map<string, number>, bullBlown: Map<string, number>) {
@@ -1013,48 +1036,125 @@ const ProjectBilling = () => {
       <Navbar />
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-5">
 
-        {/* ── Header ── */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate(`/project/${projectId}`)}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold">{project.name}</h1>
-              <div className="flex flex-wrap items-center gap-2 mt-1">
-                <Badge className="bg-primary/20 text-primary border-primary/30">{project.protocol}</Badge>
-                <Badge variant="outline">{project.cattle_type} · {project.head_count} head</Badge>
-                {project.breeding_date && (
-                  <Badge variant="outline">Breed: {format(parseISO(project.breeding_date), "MMM d, yyyy")}</Badge>
+        {/* ── Header card ── */}
+        <Card>
+          <CardContent className="p-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <Button variant="ghost" size="icon" onClick={() => navigate(`/project/${projectId}`)} className="shrink-0">
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  {project.protocol && (
+                    <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30 text-xs">
+                      {project.protocol}
+                    </Badge>
+                  )}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[currentStatus] || "bg-muted text-muted-foreground"}`}>
+                    {STATUS_LABELS[currentStatus] || currentStatus}
+                  </span>
+                  {currentStatus === "work_complete" && (
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={markBillingInvoiced}>
+                      Mark Invoiced
+                    </Button>
+                  )}
+                  {currentStatus === "invoiced_closed" && (
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={revertBillingInvoiced}>
+                      Revert to Work Complete
+                    </Button>
+                  )}
+                </div>
+                <h1 className="text-[20px] font-medium leading-tight truncate">{project.name}</h1>
+                <p className="text-[13px] text-muted-foreground mt-0.5">
+                  {[
+                    project.cattle_type,
+                    project.head_count != null ? `${project.head_count} head` : null,
+                    project.breeding_date ? format(parseISO(project.breeding_date), "MMM d, yyyy") : null,
+                  ].filter(Boolean).join(" · ")}
+                </p>
+                {hasPack && firstPack?.tanks && (
+                  <p className="text-[13px] text-muted-foreground mt-0.5">
+                    Field tank: <span className="font-medium text-foreground">
+                      {firstPack.tanks.tank_name
+                        ? `${firstPack.tanks.tank_name} (#${firstPack.tanks.tank_number})`
+                        : `Tank #${firstPack.tanks.tank_number}`}
+                    </span>
+                  </p>
                 )}
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`px-3 py-1.5 rounded-full text-xs font-medium ${STATUS_COLORS[currentStatus] || "bg-muted text-muted-foreground"}`}>
-              {STATUS_LABELS[currentStatus] || currentStatus}
-            </span>
-            {currentStatus === "work_complete" && (
-              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={markBillingInvoiced}>
-                Mark Invoiced
-              </Button>
-            )}
-            {currentStatus === "invoiced_closed" && (
-              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={revertBillingInvoiced}>
-                Revert to Work Complete
-              </Button>
-            )}
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setEditProjectOpen(true)} title="Edit Project">
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrintWorksheet} title="Breeding Worksheet">
-              <ClipboardList className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrint} title="Print PDF">
-              <Printer className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {hasPack && (
+                <Button
+                  size="sm"
+                  className="h-9 bg-emerald-600 hover:bg-emerald-600/90 text-white"
+                  onClick={handlePrintWorksheet}
+                >
+                  <Printer className="h-4 w-4 mr-1.5" /> Print worksheet
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" className="h-9 w-9" aria-label="More actions">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  {hasPack && !isUnpacked && (
+                    <DropdownMenuItem onClick={() => toast({ title: "Coming soon", description: "Unpack tank flow lands in a follow-up." })}>
+                      <Package className="h-4 w-4 mr-2" /> Unpack tank
+                    </DropdownMenuItem>
+                  )}
+                  {hasPack && packStatus === "packed" && (
+                    <DropdownMenuItem onClick={() => toast({ title: "Coming soon", description: "Edit pack flow lands in a follow-up." })}>
+                      <Edit className="h-4 w-4 mr-2" /> Edit pack
+                    </DropdownMenuItem>
+                  )}
+                  {hasPack && (!isUnpacked || packStatus === "packed") && <DropdownMenuSeparator />}
+                  <DropdownMenuItem onClick={closeOutProject}>
+                    <CheckCircle className="h-4 w-4 mr-2" /> Close out
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setEditProjectOpen(true)}>
+                    <Settings className="h-4 w-4 mr-2" /> Edit project
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handlePrint}>
+                    <Download className="h-4 w-4 mr-2" /> Export PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" /> Delete project
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Delete project confirmation */}
+        <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete project?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete {project?.name ?? "this project"} and all associated billing data. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteProject}
+                disabled={deletingProject}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deletingProject && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* ── Pack status bar ── */}
         <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-muted/50 rounded-lg flex-wrap">
