@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRightLeft, Droplets, RotateCcw, Truck, Sun, PackagePlus, ClipboardList, Package, PackageOpen, Pencil, Trash2, ChevronRight, ChevronDown } from "lucide-react";
 import TransferDialog from "@/components/inventory/TransferDialog";
@@ -264,6 +264,7 @@ function PickupForm({ row, tankName, orgId, userId, tankId, onSuccess, onCancel 
 const TankDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { orgId, userId } = useOrgRole();
   const queryClient = useQueryClient();
 
@@ -286,6 +287,25 @@ const TankDetail = () => {
   const [fillDate, setFillDate] = useState<Date>(new Date());
   const [fillNotes, setFillNotes] = useState("");
   const [fillSaving, setFillSaving] = useState(false);
+
+  // Auto-open the edit or fill dialog when navigated here from the tank
+  // list's action menu via ?action=edit / ?action=fill. We consume the
+  // param once so the dialog doesn't re-open on every render.
+  useEffect(() => {
+    const action = searchParams.get("action");
+    if (action === "edit") {
+      setEditOpen(true);
+      searchParams.delete("action");
+      setSearchParams(searchParams, { replace: true });
+    } else if (action === "fill") {
+      setFillDate(new Date());
+      setFillNotes("");
+      setFillOpen(true);
+      searchParams.delete("action");
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Movement dialog
   const [moveOpen, setMoveOpen] = useState(false);

@@ -4,8 +4,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus, Search, Users, Package, Archive, Droplets, Sun, Truck,
   AlertTriangle, AlertCircle, Upload, Check, X, FileSpreadsheet,
-  Clock, RotateCcw, ChevronsUpDown, ArrowUpDown,
+  Clock, RotateCcw, ChevronsUpDown, ArrowUpDown, MoreVertical, Eye, Pencil,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
@@ -541,134 +544,129 @@ const TanksTab = ({ orgId, orgName, companyOnly = false }: { orgId: string; orgN
           <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
           <SelectContent>{STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
         </Select>
+        <Select
+          value={`${sortKey}:${sortDir}`}
+          onValueChange={(v) => {
+            const [key, dir] = v.split(":") as [string, "asc" | "desc"];
+            setSortKey(key);
+            setSortDir(dir);
+          }}
+        >
+          <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="tank_number:asc">Sort: Number (low → high)</SelectItem>
+            <SelectItem value="tank_number:desc">Sort: Number (high → low)</SelectItem>
+            <SelectItem value="tank_name:asc">Sort: Name (A → Z)</SelectItem>
+            <SelectItem value="tank_name:desc">Sort: Name (Z → A)</SelectItem>
+            <SelectItem value="totalUnits:desc">Sort: Total Units (high → low)</SelectItem>
+            <SelectItem value="totalUnits:asc">Sort: Total Units (low → high)</SelectItem>
+            <SelectItem value="lastFill:desc">Sort: Last Fill (newest)</SelectItem>
+            <SelectItem value="lastFill:asc">Sort: Last Fill (oldest)</SelectItem>
+          </SelectContent>
+        </Select>
         <div className="relative min-w-[200px] max-w-xs flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search tanks..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
         </div>
       </div>
 
-      {/* Desktop table — xl and up */}
-      <div className="hidden xl:block rounded-lg border border-border/50 overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="whitespace-nowrap cursor-pointer hover:text-foreground" onClick={() => toggleSort("tank_number")}>
-                <span className="inline-flex items-center gap-1">Tank Number <ArrowUpDown className="h-3 w-3" /></span>
-              </TableHead>
-              <TableHead className="whitespace-nowrap cursor-pointer hover:text-foreground" onClick={() => toggleSort("tank_name")}>
-                <span className="inline-flex items-center gap-1">Tank Name <ArrowUpDown className="h-3 w-3" /></span>
-              </TableHead>
-              <TableHead className="whitespace-nowrap cursor-pointer hover:text-foreground" onClick={() => toggleSort("customer")}>
-                <span className="inline-flex items-center gap-1">Customer <ArrowUpDown className="h-3 w-3" /></span>
-              </TableHead>
-              <TableHead className="whitespace-nowrap cursor-pointer hover:text-foreground" onClick={() => toggleSort("tank_type")}>
-                <span className="inline-flex items-center gap-1">Type <ArrowUpDown className="h-3 w-3" /></span>
-              </TableHead>
-              <TableHead className="whitespace-nowrap">Status</TableHead>
-              <TableHead className="whitespace-nowrap">Model</TableHead>
-              <TableHead className="whitespace-nowrap cursor-pointer hover:text-foreground" onClick={() => toggleSort("lastFill")}>
-                <span className="inline-flex items-center gap-1">Last Fill <ArrowUpDown className="h-3 w-3" /></span>
-              </TableHead>
-              <TableHead className="whitespace-nowrap text-right cursor-pointer hover:text-foreground" onClick={() => toggleSort("totalUnits")}>
-                <span className="inline-flex items-center gap-1 justify-end">Total Units <ArrowUpDown className="h-3 w-3" /></span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">Loading…</TableCell></TableRow>
-            ) : filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">{tanks.length === 0 ? "No tanks yet." : "No tanks match your filters."}</TableCell></TableRow>
-            ) : filtered.map((tank: any) => (
-              <TableRow key={tank.id} className="cursor-pointer hover:bg-secondary/50" onClick={() => handleRowClick(tank)}>
-                <TableCell className="font-medium whitespace-nowrap">{tank.tank_number}</TableCell>
-                <TableCell className="whitespace-nowrap text-primary hover:underline">{tank.tank_name || "—"}</TableCell>
-                <TableCell className="whitespace-nowrap">{tank.customerName || orgName || "Company Owned"}</TableCell>
-                <TableCell><Badge variant="outline" className={getBadgeClass('tankType', tank.tank_type)}>{TYPE_LABELS[tank.tank_type] || tank.tank_type}</Badge></TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className={getBadgeClass('tankStatus', tank.nitrogen_status || "unknown")}>
-                      {tank.nitrogen_status || "unknown"}
-                    </Badge>
-                    <Badge variant="outline" className={
-                      tank.location_status === "here" ? "bg-green-600/20 text-green-400 border-green-600/30" :
-                      "bg-blue-600/20 text-blue-400 border-blue-600/30"
-                    }>
-                      {tank.location_status === "here" ? "in shop" : "out with customer"}
-                    </Badge>
-                  </div>
-                </TableCell>
-                <TableCell className="whitespace-nowrap">{tank.model || "—"}</TableCell>
-                <TableCell className={cn("whitespace-nowrap", getFillColor(tank.lastFill))}>{tank.lastFill ? format(parseISO(tank.lastFill), "MMM d, yyyy") : "—"}</TableCell>
-                <TableCell className="text-right">{tank.totalUnits}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Card view — below xl */}
-      <div className="xl:hidden rounded-lg border border-border/50 overflow-hidden divide-y divide-border">
-        {isLoading ? (
-          <div className="text-center py-12 text-muted-foreground">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            {tanks.length === 0 ? "No tanks yet." : "No tanks match your filters."}
-          </div>
-        ) : (
-          filtered.map((tank: any) => (
-            <div
-              key={tank.id}
-              onClick={() => handleRowClick(tank)}
-              className="p-4 space-y-3 hover:bg-secondary/50 transition-colors cursor-pointer active:bg-secondary/70"
-            >
-              {/* Row 1: Tank name/number + Total Units */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-foreground truncate">
-                    {tank.tank_name ? (
-                      <>{tank.tank_name} <span className="text-muted-foreground font-normal">#{tank.tank_number}</span></>
-                    ) : (
-                      <>Tank #{tank.tank_number}</>
+      {/* Card list — same layout at all widths so Total Units never gets clipped */}
+      {isLoading ? (
+        <div className="rounded-lg border border-border/50 px-4 py-12 text-center text-muted-foreground">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-lg border border-border/50 px-4 py-12 text-center text-muted-foreground">
+          {tanks.length === 0 ? "No tanks yet." : "No tanks match your filters."}
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {filtered.map((tank: any) => {
+            const customerLabel = tank.customerName || orgName || "Company Owned";
+            const typeLabel = TYPE_LABELS[tank.tank_type] || tank.tank_type;
+            const locLabel = tank.location_status === "here" ? "in shop" : "out";
+            const subtitleParts = [customerLabel, typeLabel, tank.model].filter(Boolean);
+            return (
+              <div
+                key={tank.id}
+                onClick={() => handleRowClick(tank)}
+                className="rounded-lg border border-border/50 bg-card px-4 py-3 hover:bg-secondary/30 transition-colors cursor-pointer active:bg-secondary/60 space-y-2"
+              >
+                {/* Row 1: [number] name + hamburger */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-foreground truncate">
+                      <span className="text-muted-foreground font-normal">[{tank.tank_number}]</span>{" "}
+                      <span className="text-primary hover:underline">{tank.tank_name || "Unnamed tank"}</span>
+                    </div>
+                    {subtitleParts.length > 0 && (
+                      <div className="text-[13px] text-muted-foreground truncate">
+                        {subtitleParts.join(" · ")}
+                      </div>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                    <Badge variant="outline" className={getBadgeClass('tankStatus', tank.nitrogen_status || 'unknown')}>
-                      {tank.nitrogen_status || 'unknown'}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Tank actions"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem onClick={() => navigate(`/tanks/${tank.id}`)}>
+                        <Eye className="h-4 w-4 mr-2" /> View tank
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate(`/tanks/${tank.id}?action=edit`)}>
+                        <Pencil className="h-4 w-4 mr-2" /> Edit tank
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate(`/tanks/${tank.id}?action=fill`)}>
+                        <Droplets className="h-4 w-4 mr-2" /> Fill tank
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Row 2: status pills + last fill */}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="outline" className={getBadgeClass("tankStatus", tank.nitrogen_status || "unknown")}>
+                      {tank.nitrogen_status || "unknown"}
                     </Badge>
-                    <Badge variant="outline" className={
-                      tank.location_status === 'here'
-                        ? 'bg-green-600/20 text-green-400 border-green-600/30'
-                        : 'bg-blue-600/20 text-blue-400 border-blue-600/30'
-                    }>
-                      {tank.location_status === 'here' ? 'in shop' : 'out'}
-                    </Badge>
-                    <Badge variant="outline" className={getBadgeClass('tankType', tank.tank_type)}>
-                      {TYPE_LABELS[tank.tank_type] || tank.tank_type}
+                    <Badge
+                      variant="outline"
+                      className={
+                        tank.location_status === "here"
+                          ? "bg-green-600/20 text-green-400 border-green-600/30"
+                          : "bg-blue-600/20 text-blue-400 border-blue-600/30"
+                      }
+                    >
+                      {locLabel}
                     </Badge>
                   </div>
+                  <div className={cn("text-[13px] text-muted-foreground", getFillColor(tank.lastFill))}>
+                    Last fill: {tank.lastFill ? format(parseISO(tank.lastFill), "MMM d, yyyy") : "—"}
+                  </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-lg font-bold tabular-nums leading-none">{tank.totalUnits}</div>
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">units</div>
-                </div>
-              </div>
 
-              {/* Row 2: Key details */}
-              <div className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-1.5 text-sm">
-                <div className="text-xs text-muted-foreground uppercase tracking-wide">Customer</div>
-                <div className="truncate">{tank.customerName || orgName || 'Company Owned'}</div>
-                <div className="text-xs text-muted-foreground uppercase tracking-wide">Model</div>
-                <div className="truncate">{tank.model || '—'}</div>
-                <div className="text-xs text-muted-foreground uppercase tracking-wide">Last Fill</div>
-                <div className={cn(getFillColor(tank.lastFill))}>
-                  {tank.lastFill ? format(parseISO(tank.lastFill), 'MMM d, yyyy') : '—'}
+                {/* Row 3: total units */}
+                <div className="text-[16px] font-bold tabular-nums">
+                  {tank.totalUnits > 0 ? (
+                    <>
+                      {tank.totalUnits.toLocaleString()}{" "}
+                      <span className="text-[13px] font-normal text-muted-foreground">units</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground font-normal">Empty</span>
+                  )}
                 </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
