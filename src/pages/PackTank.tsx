@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   Plus, Trash2, Package, CalendarDays, Loader2, X, Search,
-  Truck, ClipboardList, Printer, Check, ChevronsUpDown, Map as MapIcon, AlertTriangle,
+  Truck, ClipboardList, Printer, Check, ChevronsUpDown, Map as MapIcon, AlertTriangle, Info,
 } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
@@ -74,8 +74,10 @@ const PackTank = () => {
   const preselectedPackType = searchParams.get("packType") || "";
   const preselectedOrderId = searchParams.get("orderId") || "";
 
+  // Project packs are now created from the ProjectBilling page, not here.
+  // Any incoming `packType=project` URL falls back to the shipment tab.
   const [packType, setPackType] = useState<"project" | "shipment" | "order" | "pickup">(
-    (["project", "shipment", "order", "pickup"].includes(preselectedPackType) ? preselectedPackType : "project") as "project" | "shipment" | "order" | "pickup"
+    (["shipment", "order", "pickup"].includes(preselectedPackType) ? preselectedPackType : "shipment") as "project" | "shipment" | "order" | "pickup"
   );
   const [selectedTankId, setSelectedTankId] = useState(preselectedTankId);
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
@@ -820,16 +822,24 @@ const PackTank = () => {
           </Button>
         </div>
 
+        {/* Project packs moved to ProjectBilling — link the user there. */}
+        <div className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-[13px] text-muted-foreground">
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            To pack a tank for a project, go to the{" "}
+            <button
+              type="button"
+              className="underline hover:text-foreground"
+              onClick={() => navigate("/operations?tab=projects")}
+            >
+              project's billing page
+            </button>
+            .
+          </span>
+        </div>
+
         {/* Pack Type Toggle */}
         <div className="inline-flex rounded-lg border border-border/50 overflow-hidden flex-wrap">
-          <button
-            className={cn("flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors",
-              packType === "project" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"
-            )}
-            onClick={() => { setPackType("project"); setSelectedTankId(""); setSelectedOrders([]); setPickupCustomerId(""); }}
-          >
-            <ClipboardList className="h-4 w-4" /> Project
-          </button>
           <button
             className={cn("flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors",
               packType === "order" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50"
