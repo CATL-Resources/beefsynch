@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRightLeft, Droplets, RotateCcw, Truck, Sun, PackagePlus, ClipboardList, Package, PackageOpen, Pencil, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Droplets, RotateCcw, Truck, Sun, PackagePlus, ClipboardList, Package, PackageOpen, Pencil, Trash2, ChevronRight, ChevronDown, Search } from "lucide-react";
 import TransferDialog from "@/components/inventory/TransferDialog";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -337,7 +337,7 @@ const TankDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tank_inventory")
-        .select("*, bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, company, registration_number), customers!tank_inventory_customer_id_fkey(name)")
+        .select("*, bulls_catalog!tank_inventory_bull_catalog_id_fkey(bull_name, naab_code, company, registration_number), customers!tank_inventory_customer_id_fkey(name)")
         .eq("tank_id", id!)
         .order("canister", { ascending: true })
         .order("sub_canister", { ascending: true })
@@ -447,12 +447,15 @@ const TankDetail = () => {
     },
   });
 
+  const [inventorySearch, setInventorySearch] = useState("");
+
   // Grouped inventory by customer for communal tanks
   const isCommunal = tank?.tank_type === "communal_tank";
   const inventoryByCustomer = useMemo(() => {
     if (!isCommunal) return null;
     const map = new Map<string, { name: string; items: any[]; total: number }>();
     for (const inv of inventory) {
+      if (!matchesInventorySearch(inv, inventorySearch)) continue;
       const cid = inv.customer_id || "__company__";
       const cname = inv.customers?.name || "Company Owned";
       if (!map.has(cid)) map.set(cid, { name: cname, items: [], total: 0 });
@@ -461,10 +464,30 @@ const TankDetail = () => {
       group.total += inv.units || 0;
     }
     return Array.from(map.values());
-  }, [inventory, isCommunal]);
+  }, [inventory, isCommunal, inventorySearch]);
 
-  const activeRows = inventory.filter((r: any) => (r.units ?? 0) > 0);
-  const emptyRows = inventory.filter((r: any) => (r.units ?? 0) === 0);
+  const matchesInventorySearch = (row: any, q: string) => {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    const haystack = [
+      row.bulls_catalog?.bull_name,
+      row.bulls_catalog?.naab_code,
+      row.bull_code,
+      row.custom_bull_name,
+    ]
+      .filter(Boolean)
+      .map((v: string) => v.toLowerCase());
+    return haystack.some((s) => s.includes(needle));
+  };
+
+  const activeRows = useMemo(
+    () => inventory.filter((r: any) => (r.units ?? 0) > 0 && matchesInventorySearch(r, inventorySearch)),
+    [inventory, inventorySearch],
+  );
+  const emptyRows = useMemo(
+    () => inventory.filter((r: any) => (r.units ?? 0) === 0 && matchesInventorySearch(r, inventorySearch)),
+    [inventory, inventorySearch],
+  );
   const totalUnits = activeRows.reduce((s: number, i: any) => s + (i.units || 0), 0);
 
   const lastFill = fills.length > 0 ? fills[0] : null;
@@ -875,6 +898,22 @@ const TankDetail = () => {
               />
             )}
           </div>
+
+          <div className="mb-3 relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search bulls in this tank..."
+              value={inventorySearch}
+              onChange={(e) => setInventorySearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          {inventorySearch && activeRows.length === 0 && (!isCommunal || (inventoryByCustomer?.length ?? 0) === 0) && (
+            <p className="text-sm text-muted-foreground italic mb-3">
+              No bulls matching "{inventorySearch}" in this tank.
+            </p>
+          )}
 
           {isCommunal && inventoryByCustomer ? (
             inventoryByCustomer.map((group, gi) => (

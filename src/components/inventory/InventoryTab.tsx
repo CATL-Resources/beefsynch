@@ -72,6 +72,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
   const [storageFilter, setStorageFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState<string>(initialOwnerFilter);
   const [breedFilter, setBreedFilter] = useState<string>("all");
+  const [tankFilter, setTankFilter] = useState<string>("all");
   // "available" = company-owned, sellable; "all" = every shelf row including customer-owned.
   // Default to "available" so the dashboard shows what's actually for sale by default.
   const [shelfMode, setShelfMode] = useState<"available" | "all">("available");
@@ -315,6 +316,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     if (shelfMode === "available") result = result.filter((r) => !r.customerId);
     if (storageFilter !== "all") result = result.filter((r) => r.storageType === storageFilter);
     if (breedFilter !== "all") result = result.filter((r) => r.breed === breedFilter);
+    if (tankFilter !== "all") result = result.filter((r) => r.tankId === tankFilter);
     if (ownerFilter === "company") {
       result = result.filter((r) => !r.customerId);
     } else if (ownerFilter === "customer") {
@@ -347,7 +349,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       return 0;
     });
     return result;
-  }, [rows, shelfMode, storageFilter, ownerFilter, breedFilter, search, sortKey, sortDir]);
+  }, [rows, shelfMode, storageFilter, ownerFilter, breedFilter, tankFilter, search, sortKey, sortDir]);
 
   const groupedByBull = useMemo(() => {
     if (viewMode !== "grouped") return [];
@@ -631,57 +633,62 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
         <StatCard title="Unique Bulls" value={uniqueBulls} delay={300} index={3} icon={Dna} />
       </div>
 
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="w-44">
-          <Select value={storageFilter} onValueChange={setStorageFilter}>
-            <SelectTrigger><SelectValue placeholder="Storage Type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Storage</SelectItem>
-              <SelectItem value="customer">Customer</SelectItem>
-              <SelectItem value="communal">Communal</SelectItem>
-              <SelectItem value="rental">Rental</SelectItem>
-              <SelectItem value="inventory">Inventory</SelectItem>
-            </SelectContent>
-          </Select>
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex border border-border rounded-md overflow-hidden">
+          <button
+            onClick={() => setShelfMode("available")}
+            className={cn(
+              "px-4 py-1.5 text-sm font-medium transition-colors whitespace-nowrap",
+              shelfMode === "available" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50",
+            )}
+          >
+            Saleable
+          </button>
+          <button
+            onClick={() => setShelfMode("all")}
+            className={cn(
+              "px-4 py-1.5 text-sm font-medium transition-colors whitespace-nowrap",
+              shelfMode === "all" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50",
+            )}
+          >
+            All inventory
+          </button>
         </div>
+        <div className="relative flex-1 min-w-[200px] max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search bull name or NAAB…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3 items-center">
         <div className="w-44">
           <Select value={breedFilter} onValueChange={setBreedFilter}>
-            <SelectTrigger><SelectValue placeholder="Breed" /></SelectTrigger>
+            <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Breed" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Breeds</SelectItem>
+              <SelectItem value="all">All breeds</SelectItem>
               {breedOptions.map((b) => (
                 <SelectItem key={b.name} value={b.name}>{b.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="w-36">
-          <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); onFilterReset?.(); }}>
-            <SelectTrigger><SelectValue placeholder="Owner" /></SelectTrigger>
+        <div className="w-56">
+          <Select value={tankFilter} onValueChange={setTankFilter}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Tank" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Owners</SelectItem>
-              <SelectItem value="company">Company Only</SelectItem>
-              {shelfMode === "all" && <SelectItem value="customer">Customer Only</SelectItem>}
-              <SelectItem value="CATL">CATL</SelectItem>
-              <SelectItem value="Select">Select</SelectItem>
-              {shelfMode === "all" && customerOwnerNames.length > 0 && (
-                <>
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium border-t mt-1 pt-1">Customers</div>
-                  {customerOwnerNames.map(name => (
-                    <SelectItem key={name} value={name}>{name}</SelectItem>
-                  ))}
-                </>
-              )}
+              <SelectItem value="all">All tanks</SelectItem>
+              {tankOptions.map((t: any) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `Tank #${t.tank_number}`}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search bull, customer, tank…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
-        </div>
-        <div className="flex border border-border rounded-md overflow-hidden">
-          <button onClick={() => setShelfMode("available")} className={cn("px-3 py-1.5 text-sm transition-colors whitespace-nowrap", shelfMode === "available" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50")}>Available stock only</button>
-          <button onClick={() => setShelfMode("all")} className={cn("px-3 py-1.5 text-sm transition-colors whitespace-nowrap", shelfMode === "all" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50")}>All shelf contents</button>
         </div>
         <div className="flex border border-border rounded-md overflow-hidden">
           <button onClick={() => setViewMode("detail")} className={cn("px-3 py-1.5 text-sm transition-colors", viewMode === "detail" ? "bg-primary text-primary-foreground" : "bg-muted/30 text-muted-foreground hover:bg-muted/50")}>Detail</button>
