@@ -29,7 +29,11 @@ type SessionInvRow = {
   bull_catalog_id: string | null;
   bull_name: string;
   blown_units: number | null;
+  end_units: number | null;
+  session_id: string;
 };
+
+type SessionMetaRow = { id: string; session_date: string | null; session_type: string | null };
 
 type PackLineRow = {
   bull_catalog_id: string | null;
@@ -93,10 +97,27 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
     queryFn: async () => {
       const { data, error } = await supabase
         .from("project_billing_session_inventory")
-        .select("bull_catalog_id, bull_name, blown_units")
+        .select("bull_catalog_id, bull_name, blown_units, end_units, session_id")
         .eq("billing_id", billingId);
       if (error) throw error;
       return (data ?? []) as SessionInvRow[];
+    },
+  });
+
+  // Sessions, sorted by date — the latest field_session's End values are
+  // the suggested Returned figures for Section 3.
+  const { data: sessionMeta = [] } = useQuery({
+    queryKey: ["semen_billable_session_meta_v2", billingId],
+    enabled: !!billingId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_billing_sessions")
+        .select("id, session_date, session_type")
+        .eq("billing_id", billingId)
+        .eq("session_type", "field_session")
+        .order("session_date");
+      if (error) throw error;
+      return (data ?? []) as SessionMetaRow[];
     },
   });
 
@@ -117,6 +138,19 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
     }
     return m;
   }, [invRows]);
+
+  // Suggested Returned per bull = sum of End values on the last field session.
+  const suggestedReturnedByBull = useMemo(() => {
+    const m = new Map<string, number>();
+    const lastSession = sessionMeta[sessionMeta.length - 1];
+    if (!lastSession) return m;
+    for (const r of invRows) {
+      if (r.session_id !== lastSession.id) continue;
+      const k = r.bull_catalog_id || r.bull_name;
+      m.set(k, (m.get(k) ?? 0) + (r.end_units ?? 0));
+    }
+    return m;
+  }, [invRows, sessionMeta]);
 
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
 
@@ -226,17 +260,24 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                 <td className="px-3 py-2 text-xs text-muted-foreground">{r.bull_code || "—"}</td>
                 <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">{packed}</td>
                 <td className="px-3 py-2 text-right">
-                  <Input
-                    inputMode="numeric"
-                    className="h-7 w-[64px] text-right text-xs ml-auto"
-                    defaultValue={r.units_returned ?? ""}
-                    placeholder="—"
-                    onBlur={(e) => {
-                      const v = e.target.value === "" ? 0 : Number(e.target.value);
-                      if (v === returned) return;
-                      saveField(r, { units_returned: v });
-                    }}
-                  />
+                  {(() => {
+                    const k = r.bull_catalog_id || r.bull_name;
+                    const suggested = suggestedReturnedByBull.get(k);
+                    const placeholder = suggested != null ? String(suggested) : "—";
+                    return (
+                      <Input
+                        inputMode="numeric"
+                        className="h-7 w-[64px] text-right text-xs ml-auto"
+                        defaultValue={r.units_returned ?? ""}
+                        placeholder={placeholder}
+                        onBlur={(e) => {
+                          const v = e.target.value === "" ? 0 : Number(e.target.value);
+                          if (v === returned) return;
+                          saveField(r, { units_returned: v });
+                        }}
+                      />
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">{used || "—"}</td>
                 <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">{blown || "—"}</td>

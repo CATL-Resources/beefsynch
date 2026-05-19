@@ -1,16 +1,20 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Plus } from "lucide-react";
+import { Plus, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import SemenSessionCard, { InventoryRow } from "./SemenSessionCard";
+import UnpackFromProjectDialog from "./UnpackFromProjectDialog";
 
 interface SemenSessionsProps {
   billingId: string;
   projectId: string;
+  organizationId: string | null | undefined;
 }
+
+type ProtocolEventRow = { event_name: string; event_date: string | null };
 
 type SessionRow = {
   id: string;
@@ -33,8 +37,47 @@ type SessionInvRow = {
   sort_order: number | null;
 };
 
-export default function SemenSessions({ billingId, projectId }: SemenSessionsProps) {
+export default function SemenSessions({ billingId, projectId, organizationId }: SemenSessionsProps) {
   const queryClient = useQueryClient();
+  const [unpackOpen, setUnpackOpen] = useState(false);
+
+  // Sessions only count as breeding sessions if they happened AFTER the
+  // project's last PGF event. Pull protocol events to derive that cutoff.
+  const { data: protocolEvents = [] } = useQuery({
+    queryKey: ["protocol_events_for_sessions_v2", projectId],
+    enabled: !!projectId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("protocol_events")
+        .select("event_name, event_date")
+        .eq("project_id", projectId);
+      if (error) throw error;
+      return (data ?? []) as ProtocolEventRow[];
+    },
+  });
+  const lastPgfDate = useMemo(() => {
+    const pgfDates = protocolEvents
+      .filter((e) => /pgf/i.test(e.event_name || "") && e.event_date)
+      .map((e) => e.event_date as string)
+      .sort();
+    return pgfDates.length ? pgfDates[pgfDates.length - 1] : null;
+  }, [protocolEvents]);
+
+  // Pack info needed for the unpack dialog.
+  const { data: packInfo } = useQuery({
+    queryKey: ["semen_sessions_pack_v2", projectId],
+    enabled: !!projectId,
+    queryFn: async () => {
+      const { data: links } = await supabase
+        .from("tank_pack_projects")
+        .select("tank_pack_id, tank_packs(id, status, field_tank_id, tanks:field_tank_id(tank_name, tank_number))")
+        .eq("project_id", projectId);
+      const pack = (links ?? [])
+        .map((l: any) => l.tank_packs)
+        .find((p: any) => p && p.status !== "unpacked" && p.status !== "cancelled");
+      return pack as { id: string; field_tank_id: string; tanks: { tank_name: string | null; tank_number: string } | null } | null;
+    },
+  });
 
   const { data: sessions = [] } = useQuery({
     queryKey: ["semen_sessions_v2", billingId],
@@ -174,32 +217,75 @@ export default function SemenSessions({ billingId, projectId }: SemenSessionsPro
     refetchInventory();
   };
 
+  // Only sessions after the last PGF event count as breeding sessions.
+  // Existing pre-PGF session rows are left in the DB but hidden here.
+  const visibleSessions = useMemo(() => {
+    if (!lastPgfDate) return sessions;
+    return sessions.filter((s) => (s.session_date ?? "") > lastPgfDate);
+  }, [sessions, lastPgfDate]);
+
   return (
     <section className="space-y-3 pt-4 mt-4 border-t-2 border-border">
       <h2 className="text-lg font-semibold">Semen: used by session</h2>
-      {sessions.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">No breeding sessions yet.</p>
+      {visibleSessions.length === 0 ? (
+        <p className="text-sm text-muted-foreground italic">
+          No breeding sessions yet
+          {lastPgfDate ? ` — events on/before ${format(new Date(lastPgfDate), "MMM d")} stay in the protocol schedule.` : "."}
+        </p>
       ) : (
         <div className="space-y-3">
-          {sessions.map((s, i) => (
-            <SemenSessionCard
-              key={s.id}
-              sessionId={s.id}
-              index={i}
-              date={s.session_date}
-              headCount={s.head_count}
-              rows={(rowsBySession.get(s.id) ?? []).slice().sort((a, b) =>
-                a.bull_name.localeCompare(b.bull_name) || a.canister.localeCompare(b.canister, undefined, { numeric: true })
+          {visibleSessions.map((s, i) => (
+            <div key={s.id} className="space-y-2">
+              <SemenSessionCard
+                sessionId={s.id}
+                index={i}
+                date={s.session_date}
+                headCount={s.head_count}
+                rows={(rowsBySession.get(s.id) ?? []).slice().sort((a, b) =>
+                  a.bull_name.localeCompare(b.bull_name) || a.canister.localeCompare(b.canister, undefined, { numeric: true })
+                )}
+                onSessionField={saveSessionField}
+                onCellChange={saveCell}
+              />
+              {i === visibleSessions.length - 1 && packInfo && organizationId && (
+                <Button
+                  variant="destructive"
+                  className="w-full h-9"
+                  onClick={() => setUnpackOpen(true)}
+                >
+                  <Package className="h-4 w-4 mr-1.5" /> Unpack tank
+                </Button>
               )}
-              onSessionField={saveSessionField}
-              onCellChange={saveCell}
-            />
+            </div>
           ))}
         </div>
       )}
       <Button variant="outline" size="sm" className="h-8 text-xs" onClick={addSession}>
         <Plus className="h-3.5 w-3.5 mr-1" /> Add session
       </Button>
+      {packInfo && organizationId && (
+        <UnpackFromProjectDialog
+          open={unpackOpen}
+          onOpenChange={setUnpackOpen}
+          packId={packInfo.id}
+          fieldTankId={packInfo.field_tank_id}
+          fieldTankLabel={
+            packInfo.tanks?.tank_name
+              ? `${packInfo.tanks.tank_name} (#${packInfo.tanks.tank_number})`
+              : packInfo.tanks?.tank_number
+                ? `Tank #${packInfo.tanks.tank_number}`
+                : null
+          }
+          organizationId={organizationId}
+          billingId={billingId}
+          projectName={null}
+          onUnpackComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["semen_session_inventory_v2", billingId] });
+            queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
+            queryClient.invalidateQueries({ queryKey: ["semen_packed_v2", projectId] });
+          }}
+        />
+      )}
     </section>
   );
 }

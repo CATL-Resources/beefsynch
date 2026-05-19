@@ -30,6 +30,7 @@ import SemenSessions from "@/components/billing/SemenSessions";
 import SemenBillable from "@/components/billing/SemenBillable";
 import BillingLabor from "@/components/billing/BillingLabor";
 import BillingInvoices from "@/components/billing/BillingInvoices";
+import InventoryDrawer from "@/components/shared/InventoryDrawer";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import PackForProjectDialog from "@/components/billing/PackForProjectDialog";
 import EditPackDialog from "@/components/billing/EditPackDialog";
@@ -1236,7 +1237,7 @@ const ProjectBilling = () => {
             <ProtocolSchedule projectId={projectId} />
             <BillingProductsSection billingId={billingId} orgId={orgId} />
             <SemenPacked projectId={projectId} />
-            <SemenSessions billingId={billingId} projectId={projectId} />
+            <SemenSessions billingId={billingId} projectId={projectId} organizationId={orgId} />
             <SemenBillable billingId={billingId} projectId={projectId} />
             <BillingLabor billingId={billingId} />
             <BillingInvoices
@@ -1315,6 +1316,7 @@ const ProjectBilling = () => {
           onUnpackComplete={() => loadData()}
         />
       )}
+      <InventoryDrawer />
       <AppFooter />
     </div>
   );
