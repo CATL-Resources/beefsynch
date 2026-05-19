@@ -23,8 +23,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { generateBillingSheetPdf } from "@/lib/generateBillingSheetPdf";
 import { printBreedingWorksheet } from "@/lib/printBreedingWorksheet";
 import { getBullDisplayName } from "@/lib/bullDisplay";
-import BillingTab from "@/components/billing/BillingTab";
-import BreedingSection from "@/components/billing/BreedingSection";
+import BillingProductsSection from "@/components/billing/BillingProducts";
+import ProtocolSchedule from "@/components/billing/ProtocolSchedule";
+import SemenPacked from "@/components/billing/SemenPacked";
+import SemenSessions from "@/components/billing/SemenSessions";
+import SemenBillable from "@/components/billing/SemenBillable";
+import BillingLabor from "@/components/billing/BillingLabor";
+import BillingInvoices from "@/components/billing/BillingInvoices";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import PackForProjectDialog from "@/components/billing/PackForProjectDialog";
 import EditPackDialog from "@/components/billing/EditPackDialog";
@@ -1226,218 +1231,22 @@ const ProjectBilling = () => {
           </div>
         )}
 
-        {hasPack && firstPack && packLines.length > 0 && (() => {
-          const fieldTankLabel = firstPack.tanks?.tank_name
-            ? `${firstPack.tanks.tank_name} (#${firstPack.tanks.tank_number})`
-            : firstPack.tanks?.tank_number
-              ? `Tank #${firstPack.tanks.tank_number}`
-              : "Field tank";
-          // Roll up by bull + field canister; split pulls collapse into one row
-          const rollupMap = new Map<string, { bullName: string; naabCode: string | null; fieldCanister: string; units: number }>();
-          for (const line of packLines) {
-            const bullName = line.bulls_catalog?.bull_name || line.bull_name || "(unknown)";
-            const naabCode = line.bulls_catalog?.naab_code || line.bull_code || null;
-            const fieldCanister = line.field_canister || "1";
-            const key = `${line.bull_catalog_id || line.bull_name}_${fieldCanister}`;
-            const existing = rollupMap.get(key);
-            if (existing) {
-              existing.units += line.units || 0;
-            } else {
-              rollupMap.set(key, { bullName, naabCode, fieldCanister, units: line.units || 0 });
-            }
-          }
-          const rows = Array.from(rollupMap.values()).sort((a, b) => a.fieldCanister.localeCompare(b.fieldCanister, undefined, { numeric: true }));
-          const totalUnits = rows.reduce((s, r) => s + r.units, 0);
-          return (
-            <section className="space-y-2">
-              <h2 className="text-sm font-semibold flex items-center gap-2">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                Packed → {fieldTankLabel}
-                <span className="text-xs font-normal text-muted-foreground">· {totalUnits} units</span>
-              </h2>
-              <div className="rounded-lg border border-border/50 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/30">
-                      <TableHead>Bull</TableHead>
-                      <TableHead>NAAB</TableHead>
-                      <TableHead>Field can</TableHead>
-                      <TableHead className="text-right">Units</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((r, i) => (
-                      <TableRow key={`${r.bullName}-${r.fieldCanister}-${i}`}>
-                        <TableCell className="font-medium">{r.bullName}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.naabCode ?? "—"}</TableCell>
-                        <TableCell className="text-sm">{r.fieldCanister}</TableCell>
-                        <TableCell className="text-right font-medium">{r.units}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              {(firstPack.packed_at || firstPack.packed_by) && (
-                <p className="text-[12px] text-muted-foreground">
-                  Packed
-                  {firstPack.packed_at && <> {format(parseISO(firstPack.packed_at), "MMM d, yyyy")}</>}
-                  {firstPack.packed_by && <> by {firstPack.packed_by}</>}
-                </p>
-              )}
-            </section>
-          );
-        })()}
-
-        {!hasPack && (
-          <p className="text-xs text-muted-foreground italic">Sessions will appear after packing</p>
+        {projectId && billingId && (
+          <div className={hasPack ? "space-y-2" : "opacity-40 pointer-events-none space-y-2"}>
+            <ProtocolSchedule projectId={projectId} />
+            <BillingProductsSection billingId={billingId} orgId={orgId} />
+            <SemenPacked projectId={projectId} />
+            <SemenSessions billingId={billingId} projectId={projectId} />
+            <SemenBillable billingId={billingId} projectId={projectId} />
+            <BillingLabor billingId={billingId} />
+            <BillingInvoices
+              billingId={billingId}
+              onPrintWorksheet={handlePrintWorksheet}
+              onCloseOut={closeOutProject}
+              currentStatus={currentStatus}
+            />
+          </div>
         )}
-
-        <div className={hasPack ? "" : "opacity-40 pointer-events-none"}>
-
-        {/* ── Breeding Sessions worksheet ── */}
-        {/* ── Protocol schedule ── */}
-        {(() => {
-          const protocolSessions = sessions.filter((s) => {
-            const label = (s.session_label || "").toLowerCase();
-            const isBreeding =
-              label.includes("breed") || label.includes("ai") || label.includes("tai") ||
-              label.includes(" am") || label.includes(" pm") || label.endsWith("am") || label.endsWith("pm");
-            return !isBreeding;
-          });
-          if (protocolSessions.length === 0) return null;
-          return (
-            <section className="space-y-3">
-              <h2 className="text-lg font-semibold">Protocol schedule</h2>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium w-[110px]">Date</th>
-                      <th className="text-left px-3 py-2 font-medium w-[180px]">Event</th>
-                      <th className="text-left px-3 py-2 font-medium">Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {protocolSessions
-                      .slice()
-                      .sort((a, b) => (a.session_date || "").localeCompare(b.session_date || ""))
-                      .map((s) => (
-                        <tr key={s.id} className="border-t border-border/40">
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {s.session_date ? format(parseISO(s.session_date), "MMM d") : "—"}
-                          </td>
-                          <td className="px-3 py-2 font-medium">{s.session_label || "—"}</td>
-                          <td className="px-3 py-2">
-                            {readOnly ? (
-                              <span className="text-muted-foreground">{s.notes || "—"}</span>
-                            ) : (
-                              <Input
-                                className="h-7 text-sm"
-                                key={`protocol-notes-${s.id}`}
-                                defaultValue={s.notes ?? ""}
-                                placeholder="Notes…"
-                                onBlur={(e) => {
-                                  const val = e.target.value || null;
-                                  if (val === s.notes) return;
-                                  if (s.id) saveSessionField(s.id, "notes", val);
-                                }}
-                              />
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          );
-        })()}
-
-        <BreedingSection
-          sessions={sessions.filter((s) => {
-            const label = (s.session_label || "").toLowerCase();
-            return (
-              label.includes("breed") || label.includes("ai") || label.includes("tai") ||
-              label.includes(" am") || label.includes(" pm") || label.endsWith("am") || label.endsWith("pm")
-            );
-          })}
-          allSessions={sessions}
-          productLines={productLines}
-          sessionInventory={sessionInventory}
-          semenLines={semenLines}
-          billingProducts={billingProducts}
-          readOnly={readOnly}
-          onSaveSession={saveSessionLine}
-          onSaveProduct={saveProductLine}
-          onSwapProduct={swapProduct}
-          onRemoveProduct={deleteAdditionalProductLine}
-          onAddProductToSession={addProductToSession}
-          onAddBreedingSession={addBreedingSession}
-          onRemoveSession={removeSession}
-          onSaveWorksheetCell={saveWorksheetCell}
-          onSetSessionInventory={setSessionInventory}
-          onTotalUsedChanged={(_totalUsed, bullUsed, bullBlown) => {
-            // Propagate per-bull usage from the worksheet into the semen
-            // billable summary. Only writes the rows that actually changed.
-            const updates: Array<{ id: string; units_billable: number; units_blown: number; line_total: number }> = [];
-            const updated = semenLines.map((sl) => {
-              const key = sl.bull_catalog_id || sl.bull_name;
-              const used = bullUsed.get(key) ?? 0;
-              const blown = bullBlown.get(key) ?? 0;
-              const billable = Math.max(0, used - blown);
-              const line_total = billable * (sl.unit_price ?? 0);
-              const changed =
-                sl.units_billable !== billable ||
-                sl.units_blown !== blown ||
-                sl.line_total !== line_total;
-              if (changed && sl.id) {
-                updates.push({ id: sl.id, units_billable: billable, units_blown: blown, line_total });
-                return { ...sl, units_billable: billable, units_blown: blown, line_total };
-              }
-              return sl;
-            });
-            if (updates.length === 0) return;
-            setSemenLines(updated);
-            for (const u of updates) {
-              supabase
-                .from("project_billing_semen")
-                .update({ units_billable: u.units_billable, units_blown: u.units_blown, line_total: u.line_total })
-                .eq("id", u.id);
-            }
-          }}
-        />
-
-        {/* ── Billing sheet ── */}
-        <fieldset disabled={readOnly} className="contents [&_button]:disabled:pointer-events-auto">
-          <BillingTab
-            productLines={productLines} semenLines={semenLines}
-            usedByBull={(() => {
-              // Sum (start - end) per bull across all session inventory rows.
-              // Drives the read-only "Used" column on the Semen summary.
-              const m = new Map<string, number>();
-              for (const r of sessionInventory) {
-                const k = (r.bull_catalog_id as string) || r.bull_name || "";
-                if (!k) continue;
-                const used = Math.max(0, (r.start_units ?? 0) - (r.end_units ?? 0));
-                m.set(k, (m.get(k) ?? 0) + used);
-              }
-              return m;
-            })()}
-            laborLines={laborLines}
-            billingRecord={billingRecord} readOnly={readOnly}
-            onSaveProduct={saveProductLine} onSaveSemen={saveSemenLine}
-            onSaveBillingField={saveBillingField}
-            onSaveLabor={saveLaborLine}
-            onAddLabor={addLaborLine}
-            onDeleteLabor={deleteLaborLine}
-            onAddProduct={addAdditionalProduct}
-            availableProducts={billingProducts}
-            onDeleteProduct={deleteAdditionalProductLine}
-            onCloseOut={closeOutProject}
-            currentStatus={currentStatus}
-          />
-        </fieldset>
-        </div>
       </main>
 
       {/* Save confirmation toast */}
