@@ -59,6 +59,7 @@ const Billable = () => {
         semen_order_items(units, bull_catalog_id, custom_bull_name, bulls_catalog(bull_name, naab_code))
       `)
       .eq("organization_id", orgId)
+      .eq("order_type", "customer")
       .eq("fulfillment_status", "fulfilled")
       .is("invoiced_at", null)
       .order("order_date", { ascending: true });
