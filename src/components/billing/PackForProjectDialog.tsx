@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, X, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useOrgRole } from "@/hooks/useOrgRole";
@@ -9,6 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import BullCombobox from "@/components/BullCombobox";
 
 interface PackForProjectDialogProps {
@@ -49,7 +52,10 @@ type BullSection = {
   fieldCanister: string;
   pulls: PullRow[];
   fromPlan: boolean;
+  projects: string[]; // project names this bull is needed for
 };
+
+type ProjectOption = { id: string; name: string };
 
 const tankDisplay = (t: { tank_name: string | null; tank_number: string } | null) => {
   if (!t) return "—";
@@ -93,19 +99,25 @@ export default function PackForProjectDialog({
   const [selectedFieldTankId, setSelectedFieldTankId] = useState<string>("");
   const [bullSections, setBullSections] = useState<BullSection[]>([]);
   const [addingExtra, setAddingExtra] = useState(false);
+  const [availableProjects, setAvailableProjects] = useState<ProjectOption[]>([]);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
-  // Reset + load when opened
+  // Reset on open. Always seed with the parent project.
+  useEffect(() => {
+    if (!open) return;
+    setBullSections([]);
+    setSelectedFieldTankId("");
+    setAddingExtra(false);
+    setSelectedProjectIds([projectId]);
+  }, [open, projectId]);
+
+  // Load tanks + the projects the user can add (Confirmed or In Field in this org).
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-
-    const load = async () => {
-      setLoading(true);
-      setBullSections([]);
-      setSelectedFieldTankId("");
-      setAddingExtra(false);
-
-      const [tanksRes, plannedRes] = await Promise.all([
+    (async () => {
+      const [tanksRes, projectsRes] = await Promise.all([
         supabase
           .from("tanks")
           .select("id, tank_name, tank_number, tank_type, nitrogen_status, location_status")
@@ -114,49 +126,121 @@ export default function PackForProjectDialog({
           .eq("nitrogen_status", "wet")
           .order("tank_number"),
         supabase
-          .from("project_bulls")
-          .select("bull_catalog_id, units, bulls_catalog(bull_name, naab_code)")
-          .eq("project_id", projectId)
-          .not("bull_catalog_id", "is", null),
+          .from("projects")
+          .select("id, name")
+          .eq("organization_id", organizationId)
+          .in("status", ["Confirmed", "In Field"])
+          .order("name"),
       ]);
-
       if (cancelled) return;
       if (tanksRes.error) toast({ title: "Could not load tanks", description: tanksRes.error.message, variant: "destructive" });
       setFieldTanks((tanksRes.data ?? []) as FieldTank[]);
+      // Make sure the parent project is always selectable even if its status
+      // doesn't match the filter (e.g. already In Field with a prior pack).
+      const projects = (projectsRes.data ?? []) as ProjectOption[];
+      if (!projects.some((p) => p.id === projectId) && projectName) {
+        projects.unshift({ id: projectId, name: projectName });
+      }
+      setAvailableProjects(projects);
+    })();
+    return () => { cancelled = true; };
+  }, [open, organizationId, projectId, projectName]);
 
-      const planned = (plannedRes.data ?? []) as Array<{
+  // Reload bull sections whenever the selected-projects set changes.
+  useEffect(() => {
+    if (!open || selectedProjectIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+
+      const { data: plannedData } = await supabase
+        .from("project_bulls")
+        .select("project_id, bull_catalog_id, units, bulls_catalog(bull_name, naab_code), projects:project_id(name)")
+        .in("project_id", selectedProjectIds)
+        .not("bull_catalog_id", "is", null);
+
+      if (cancelled) return;
+
+      const planned = (plannedData ?? []) as Array<{
+        project_id: string;
         bull_catalog_id: string;
         units: number;
         bulls_catalog: { bull_name: string; naab_code: string | null } | null;
+        projects: { name: string } | null;
       }>;
+
+      // Roll up by bull: same bull across projects = one section with combined need.
+      const byBull = new Map<string, {
+        bullName: string;
+        naabCode: string | null;
+        needed: number;
+        projects: string[];
+      }>();
+      for (const pb of planned) {
+        if (!pb.bull_catalog_id) continue;
+        const entry = byBull.get(pb.bull_catalog_id);
+        const projName = pb.projects?.name ?? "(project)";
+        if (entry) {
+          entry.needed += pb.units;
+          if (!entry.projects.includes(projName)) entry.projects.push(projName);
+        } else {
+          byBull.set(pb.bull_catalog_id, {
+            bullName: pb.bulls_catalog?.bull_name ?? "(unnamed bull)",
+            naabCode: pb.bulls_catalog?.naab_code ?? null,
+            needed: pb.units,
+            projects: [projName],
+          });
+        }
+      }
+
+      // Preserve user-entered pull amounts and field canisters across reloads
+      // by keying on bullCatalogId.
+      const prevByBull = new Map<string, BullSection>();
+      setBullSections((cur) => {
+        for (const s of cur) prevByBull.set(s.bullCatalogId, s);
+        return cur;
+      });
 
       const sections: BullSection[] = [];
       let idx = 0;
-      for (const pb of planned) {
-        if (!pb.bull_catalog_id) continue;
-        const inventory = await loadInventoryForBull(organizationId, pb.bull_catalog_id);
+      for (const [bullCatalogId, info] of byBull.entries()) {
+        const inventory = await loadInventoryForBull(organizationId, bullCatalogId);
         if (cancelled) return;
+        const previous = prevByBull.get(bullCatalogId);
         idx += 1;
+        // Merge previous pull amounts onto the freshly-loaded inventory rows.
+        const prevPullByInv = new Map<string, string>();
+        if (previous) for (const p of previous.pulls) prevPullByInv.set(p.inventoryId, p.units);
+        const pulls = buildPulls(inventory).map((p) => ({
+          ...p,
+          units: prevPullByInv.get(p.inventoryId) ?? "",
+        }));
         sections.push({
-          key: pb.bull_catalog_id,
-          bullCatalogId: pb.bull_catalog_id,
-          bullName: pb.bulls_catalog?.bull_name ?? "(unnamed bull)",
-          naabCode: pb.bulls_catalog?.naab_code ?? null,
-          needed: pb.units,
-          fieldCanister: String(idx),
-          pulls: buildPulls(inventory),
+          key: bullCatalogId,
+          bullCatalogId,
+          bullName: info.bullName,
+          naabCode: info.naabCode,
+          needed: info.needed,
+          fieldCanister: previous?.fieldCanister ?? String(idx),
+          pulls,
           fromPlan: true,
+          projects: info.projects,
         });
       }
+
+      // Carry over any extra (off-plan) bulls the user added manually.
+      const carryExtras: BullSection[] = [];
+      for (const [bullCatalogId, sec] of prevByBull.entries()) {
+        if (!sec.fromPlan && !byBull.has(bullCatalogId)) carryExtras.push(sec);
+      }
+
       if (!cancelled) {
-        setBullSections(sections);
+        setBullSections([...sections, ...carryExtras]);
         setLoading(false);
       }
-    };
-
-    load();
+    })();
     return () => { cancelled = true; };
-  }, [open, projectId, organizationId]);
+  }, [open, selectedProjectIds, organizationId]);
 
   const updateSection = (key: string, patch: Partial<BullSection>) =>
     setBullSections((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
@@ -201,9 +285,26 @@ export default function PackForProjectDialog({
         fieldCanister: String(prev.length + 1),
         pulls: buildPulls(inventory),
         fromPlan: false,
+        projects: [],
       },
     ]);
   };
+
+  const toggleProject = (id: string) => {
+    setSelectedProjectIds((prev) => {
+      if (prev.includes(id)) {
+        // Don't allow removing the parent project — that's the project the
+        // user is actively working on.
+        if (id === projectId) return prev;
+        return prev.filter((p) => p !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
+  const selectedProjectsForChips = selectedProjectIds
+    .map((id) => availableProjects.find((p) => p.id === id))
+    .filter((p): p is ProjectOption => !!p);
 
   const totals = useMemo(() => {
     let unitsTotal = 0;
@@ -218,13 +319,12 @@ export default function PackForProjectDialog({
     return { unitsTotal, bullsTotal };
   }, [bullSections]);
 
-  const canSubmit = !!selectedFieldTankId && totals.unitsTotal > 0 && !submitting;
+  const canSubmit = !!selectedFieldTankId && totals.unitsTotal > 0 && selectedProjectIds.length > 0 && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      // Look up the current user's display name for packed_by
       let packedBy: string | null = null;
       if (userId) {
         const { data: member } = await supabase
@@ -273,7 +373,7 @@ export default function PackForProjectDialog({
         field_tank_id: selectedFieldTankId,
         packed_at: new Date().toISOString(),
         packed_by: packedBy,
-        project_ids: [projectId],
+        project_ids: selectedProjectIds,
         order_ids: [] as string[],
         pickup_order_ids: [] as string[],
         lines,
@@ -284,15 +384,19 @@ export default function PackForProjectDialog({
       const result = data as { ok?: boolean; pack_id?: string } | null;
       if (!result?.ok) throw new Error("Pack failed: invalid response from server");
 
-      // Packing advances the project to "In Field" but only from earlier
-      // stages so an already-billed project doesn't get rolled back.
+      // Advance every packed project to "In Field" (only from pre-pack stages).
       await supabase
         .from("projects")
         .update({ status: "In Field" })
-        .eq("id", projectId)
+        .in("id", selectedProjectIds)
         .in("status", ["Tentative", "Confirmed"]);
 
-      toast({ title: "Tank packed successfully" });
+      toast({
+        title: "Tank packed successfully",
+        description: selectedProjectIds.length > 1
+          ? `Linked to ${selectedProjectIds.length} projects.`
+          : undefined,
+      });
       onPackComplete();
       onOpenChange(false);
     } catch (err: any) {
@@ -308,7 +412,7 @@ export default function PackForProjectDialog({
         <DialogHeader>
           <DialogTitle>Pack tank{projectName ? ` — ${projectName}` : ""}</DialogTitle>
           <DialogDescription>
-            Select a field tank and confirm where to pull each bull from.
+            Select a field tank and confirm where to pull each bull from. Add additional projects to send out in the same tank.
           </DialogDescription>
         </DialogHeader>
 
@@ -331,6 +435,70 @@ export default function PackForProjectDialog({
             </select>
           </div>
 
+          {/* Multi-project picker */}
+          <div className="space-y-1.5">
+            <Label>Projects in this pack</Label>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {selectedProjectsForChips.map((p) => (
+                <Badge
+                  key={p.id}
+                  variant="outline"
+                  className="bg-primary/10 text-primary border-primary/30 gap-1 pl-2 pr-1 py-0.5 text-xs"
+                >
+                  {p.name}
+                  {p.id !== projectId && (
+                    <button
+                      type="button"
+                      onClick={() => toggleProject(p.id)}
+                      className="hover:bg-primary/20 rounded p-0.5"
+                      aria-label={`Remove ${p.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </Badge>
+              ))}
+              <Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
+                    <Plus className="h-3.5 w-3.5" /> Add project
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[320px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search projects…" className="h-9" />
+                    <CommandList>
+                      <CommandEmpty>No matching projects.</CommandEmpty>
+                      <CommandGroup>
+                        {availableProjects
+                          .filter((p) => p.id !== projectId)
+                          .map((p) => {
+                            const checked = selectedProjectIds.includes(p.id);
+                            return (
+                              <CommandItem
+                                key={p.id}
+                                value={p.name}
+                                onSelect={() => toggleProject(p.id)}
+                                className="flex items-center gap-2"
+                              >
+                                <div className={`h-4 w-4 rounded border flex items-center justify-center ${checked ? "bg-primary border-primary" : "border-input"}`}>
+                                  {checked && <Check className="h-3 w-3 text-primary-foreground" />}
+                                </div>
+                                <span className="text-sm">{p.name}</span>
+                              </CommandItem>
+                            );
+                          })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Only Confirmed and In Field projects show here.
+            </p>
+          </div>
+
           {loading ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading planned bulls and inventory…
@@ -338,7 +506,7 @@ export default function PackForProjectDialog({
           ) : (
             <div className="space-y-4">
               {bullSections.length === 0 && (
-                <p className="text-sm text-muted-foreground italic">No bulls on this project plan. Add one below.</p>
+                <p className="text-sm text-muted-foreground italic">No bulls on any selected project plan. Add one below.</p>
               )}
 
               {bullSections.map((s) => {
@@ -355,8 +523,11 @@ export default function PackForProjectDialog({
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {s.fromPlan ? `Need ${s.needed}` : "Not on project plan"}
+                          {s.fromPlan ? `Need ${s.needed}` : "Not on any plan"}
                           {sectionPulled > 0 && <> · Pulling {sectionPulled}</>}
+                          {s.projects.length > 1 && (
+                            <> · <span className="text-foreground/70">{s.projects.join(", ")}</span></>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -430,6 +601,7 @@ export default function PackForProjectDialog({
         <DialogFooter className="sm:justify-between gap-2">
           <div className="text-xs text-muted-foreground self-center">
             Total: {totals.unitsTotal} units from {totals.bullsTotal} bull{totals.bullsTotal === 1 ? "" : "s"}
+            {selectedProjectIds.length > 1 && <> · {selectedProjectIds.length} projects</>}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>

@@ -228,8 +228,7 @@ const PacksList = ({ orgId }: { orgId: string }) => {
     }
     const projects = (row.tank_pack_projects || []);
     if (projects.length === 0) return "—";
-    const first = projects[0]?.projects?.name || "—";
-    return projects.length > 1 ? `${first} (+${projects.length - 1} more)` : first;
+    return projects.map((p: any) => p?.projects?.name || "—").join(", ");
   };
 
   const getLineStats = (row: any) => {
