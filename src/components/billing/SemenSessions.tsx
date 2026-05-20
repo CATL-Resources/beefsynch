@@ -304,10 +304,12 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
     }
     const toFix = inventory.filter((r) => {
       if (r.session_id !== firstSession.id) return false;
-      if (r.end_units != null || r.blown_units != null) return false; // untouched only
+      // Only seed Session 1 rows that have never been written. Any value
+      // (including 0) means a user or earlier seed already took ownership.
+      if (r.start_units != null) return false;
       const k = `${r.bull_catalog_id || r.bull_name}|${r.canister || ""}`;
       const expected = packByKey.get(k);
-      return expected != null && expected !== (r.start_units ?? 0);
+      return expected != null;
     });
     if (toFix.length === 0) return;
     Promise.all(

@@ -252,8 +252,10 @@ const ProjectBilling = () => {
         const existing = existingMap.get(key);
 
         if (existing) {
-          // Row exists — update start_units if packed total changed (only for first session)
-          if (sessIdx === 0 && existing.start_units !== combo.packed_units) {
+          // Row exists — only seed start_units when it's still NULL on the
+          // first session. Once it has any value (initial seed OR a user
+          // edit), this loop never touches it again.
+          if (sessIdx === 0 && existing.start_units == null) {
             await supabase.from("project_billing_session_inventory")
               .update({ start_units: combo.packed_units })
               .eq("id", existing.id);
@@ -282,12 +284,10 @@ const ProjectBilling = () => {
         .insert(toInsert);
     }
 
-    // Reload session inventory into state if anything changed
-    if (toInsert.length > 0 || existingRows?.some((r: any) => {
-      const bullKey = r.bull_catalog_id || `name:${r.bull_name}`;
-      const combo = combos.find(c => (c.bull_catalog_id || `name:${c.bull_name}`) === bullKey && c.canister === r.canister);
-      return combo && r.start_units !== combo.packed_units;
-    })) {
+    // Reload only when we actually wrote new rows. The earlier broader check
+    // ('any row whose start_units != packed') was the cascade vector — it
+    // kept re-pulling DB state and clobbering optimistic user edits.
+    if (toInsert.length > 0) {
       const { data: refreshed } = await supabase.from("project_billing_session_inventory")
         .select("*").eq("billing_id", bId).order("sort_order");
       setSessionInventory((refreshed ?? []) as SessionInventoryLine[]);
