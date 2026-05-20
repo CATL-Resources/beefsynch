@@ -40,25 +40,35 @@ type PullRow = {
   sourceTankLabel: string;
   sourceCanister: string | null;
   available: number;
-  units: string;
+};
+
+type DestRow = {
+  id: string;
+  fieldCanister: string;
+  units: string; // text so empty stays empty (no "0" default)
 };
 
 type BullSection = {
-  key: string; // unique per section — same bull can have multiple sections (canister splits)
+  key: string; // unique per section
   bullCatalogId: string;
   bullName: string;
   naabCode: string | null;
   needed: number;
-  fieldCanister: string;
-  pulls: PullRow[];
+  pulls: PullRow[];          // source inventory rows (display only)
+  destinations: DestRow[];   // where each destination canister goes
   fromPlan: boolean;
-  projects: string[]; // project names this bull is needed for
+  projects: string[];        // project names this bull is needed for
 };
 
 const newSectionKey = () =>
   (typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `sec-${Math.random().toString(36).slice(2)}-${Date.now()}`);
+
+const newDestId = () =>
+  (typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `dst-${Math.random().toString(36).slice(2)}-${Date.now()}`);
 
 type ProjectOption = { id: string; name: string };
 
@@ -90,8 +100,16 @@ const buildPulls = (inventory: InventoryRow[]): PullRow[] =>
     sourceTankLabel: tankDisplay(row.tanks),
     sourceCanister: row.canister,
     available: row.units,
-    units: "",
   }));
+
+// Make one initial destination row covering the bull's planned need.
+const initialDestinations = (needed: number, startCan: number): DestRow[] => [
+  {
+    id: newDestId(),
+    fieldCanister: startCan > 0 ? String(startCan) : "",
+    units: needed > 0 ? String(needed) : "",
+  },
+];
 
 export default function PackForProjectDialog({
   open, onOpenChange, projectId, projectName, organizationId, onPackComplete,
@@ -217,21 +235,15 @@ export default function PackForProjectDialog({
         if (cancelled) return;
         const previous = prevFromPlanByBull.get(bullCatalogId);
         idx += 1;
-        // Merge previous pull amounts onto the freshly-loaded inventory rows.
-        const prevPullByInv = new Map<string, string>();
-        if (previous) for (const p of previous.pulls) prevPullByInv.set(p.inventoryId, p.units);
-        const pulls = buildPulls(inventory).map((p) => ({
-          ...p,
-          units: prevPullByInv.get(p.inventoryId) ?? "",
-        }));
+        const pulls = buildPulls(inventory);
         sections.push({
           key: previous?.key ?? newSectionKey(),
           bullCatalogId,
           bullName: info.bullName,
           naabCode: info.naabCode,
           needed: info.needed,
-          fieldCanister: previous?.fieldCanister ?? String(idx),
           pulls,
+          destinations: previous?.destinations ?? initialDestinations(info.needed, idx),
           fromPlan: true,
           projects: info.projects,
         });
@@ -249,43 +261,36 @@ export default function PackForProjectDialog({
     return () => { cancelled = true; };
   }, [open, selectedProjectIds, organizationId]);
 
-  const updateSection = (key: string, patch: Partial<BullSection>) =>
-    setBullSections((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
-
-  const updatePull = (sectionKey: string, inventoryId: string, units: string) => {
-    const digits = units.replace(/[^0-9]/g, "");
-    setBullSections((prev) => prev.map((s) =>
-      s.key === sectionKey
-        ? { ...s, pulls: s.pulls.map((p) => (p.inventoryId === inventoryId ? { ...p, units: digits } : p)) }
-        : s,
-    ));
-  };
-
-  // Removes any section by key — used for off-plan extras AND for the extra
-  // canister-split sections a user added on top of a planned bull.
   const removeExtraSection = (key: string) =>
     setBullSections((prev) => prev.filter((s) => !(s.key === key && !s.fromPlan)));
 
-  // Add another canister for an existing bull. Reuses the bull metadata from
-  // the source section but starts fresh with an empty field canister + pulls.
-  const addCanisterSplit = async (sourceKey: string) => {
-    const source = bullSections.find((s) => s.key === sourceKey);
-    if (!source) return;
-    const inventory = await loadInventoryForBull(organizationId, source.bullCatalogId);
-    setBullSections((prev) => [
-      ...prev,
-      {
-        key: newSectionKey(),
-        bullCatalogId: source.bullCatalogId,
-        bullName: source.bullName,
-        naabCode: source.naabCode,
-        needed: 0,
-        fieldCanister: "",
-        pulls: buildPulls(inventory),
-        fromPlan: false,
-        projects: source.projects,
-      },
-    ]);
+  const updateDestination = (sectionKey: string, destId: string, patch: Partial<DestRow>) => {
+    setBullSections((prev) => prev.map((s) => {
+      if (s.key !== sectionKey) return s;
+      return {
+        ...s,
+        destinations: s.destinations.map((d) => (d.id === destId ? { ...d, ...patch } : d)),
+      };
+    }));
+  };
+
+  const addDestination = (sectionKey: string) => {
+    setBullSections((prev) => prev.map((s) => {
+      if (s.key !== sectionKey) return s;
+      return {
+        ...s,
+        destinations: [...s.destinations, { id: newDestId(), fieldCanister: "", units: "" }],
+      };
+    }));
+  };
+
+  const removeDestination = (sectionKey: string, destId: string) => {
+    setBullSections((prev) => prev.map((s) => {
+      if (s.key !== sectionKey) return s;
+      // Always keep at least one destination row so the user has something to fill in.
+      if (s.destinations.length <= 1) return s;
+      return { ...s, destinations: s.destinations.filter((d) => d.id !== destId) };
+    }));
   };
 
   const handleAddExtraBull = async (
@@ -293,8 +298,12 @@ export default function PackForProjectDialog({
     catalogId: string | null,
     naabCode?: string | null,
   ) => {
-    setAddingExtra(false);
+    // IMPORTANT: only close the picker once the user actually picks a catalog
+    // entry. The BullCombobox fires onChange on EVERY keystroke (catalogId
+    // null until a result is clicked); closing on the first keystroke
+    // unmounts the input and silently swallows typing.
     if (!catalogId) return;
+    setAddingExtra(false);
     // Duplicate bulls ARE allowed — same bull can go into multiple field
     // canisters. The pack_tank RPC writes one tank_pack_lines row per pull
     // and there's no unique constraint on (pack_id, bull_catalog_id).
@@ -312,8 +321,8 @@ export default function PackForProjectDialog({
         bullName: bullRow?.bull_name ?? _name,
         naabCode: bullRow?.naab_code ?? naabCode ?? null,
         needed: 0,
-        fieldCanister: String(prev.length + 1),
         pulls: buildPulls(inventory),
+        destinations: initialDestinations(0, prev.length + 1),
         fromPlan: false,
         projects: [],
       },
@@ -340,7 +349,7 @@ export default function PackForProjectDialog({
     let unitsTotal = 0;
     let bullsTotal = 0;
     for (const s of bullSections) {
-      const sectionUnits = s.pulls.reduce((sum, p) => sum + (Number(p.units) || 0), 0);
+      const sectionUnits = s.destinations.reduce((sum, d) => sum + (Number(d.units) || 0), 0);
       if (sectionUnits > 0) {
         bullsTotal += 1;
         unitsTotal += sectionUnits;
@@ -376,52 +385,60 @@ export default function PackForProjectDialog({
         units: number;
       }> = [];
 
-      // First pass: aggregate pulls per source inventory row so a bull
-      // split across multiple field canisters can't over-allocate from the
-      // same source slot. Capacity (available) is shared across sections.
-      const pullByInv = new Map<string, { units: number; available: number; label: string; bullName: string }>();
+      // Per-bull FIFO allocation: walk the destination rows in order and
+      // draw from the available source pulls (highest-units first by load
+      // order). Splits across sources produce separate tank_pack_lines rows.
+      // Sources are shared across sections of the same bull (canister splits
+      // of one bull all draw from the same inventory pool).
+      const sourceRemaining = new Map<string, number>(); // inventoryId → remaining
+      const sourceInfo = new Map<string, { sourceTankId: string; sourceCanister: string | null; label: string }>();
       for (const s of bullSections) {
         for (const p of s.pulls) {
-          const units = Number(p.units) || 0;
-          if (units <= 0) continue;
-          const entry = pullByInv.get(p.inventoryId);
-          if (entry) {
-            entry.units += units;
-          } else {
-            pullByInv.set(p.inventoryId, {
-              units,
-              available: p.available,
+          if (!sourceRemaining.has(p.inventoryId)) {
+            sourceRemaining.set(p.inventoryId, p.available);
+            sourceInfo.set(p.inventoryId, {
+              sourceTankId: p.sourceTankId,
+              sourceCanister: p.sourceCanister,
               label: p.sourceTankLabel + (p.sourceCanister ? ` · can ${p.sourceCanister}` : ""),
-              bullName: s.bullName,
             });
           }
         }
       }
-      for (const [, agg] of pullByInv) {
-        if (agg.units > agg.available) {
-          throw new Error(
-            `${agg.bullName}: total pull across canisters (${agg.units}) exceeds available (${agg.available}) in ${agg.label}.`,
-          );
-        }
-      }
 
       for (const s of bullSections) {
-        for (const p of s.pulls) {
-          const units = Number(p.units) || 0;
-          if (units <= 0) continue;
-          lines.push({
-            source_tank_id: p.sourceTankId,
-            bull_catalog_id: s.bullCatalogId,
-            bull_name: s.bullName,
-            bull_code: s.naabCode,
-            source_canister: p.sourceCanister,
-            field_canister: s.fieldCanister.trim() || null,
-            units,
-          });
+        // Build the ordered source queue for THIS bull from its pulls (which
+        // are sorted by units desc at load time).
+        for (const d of s.destinations) {
+          let need = Number(d.units) || 0;
+          if (need <= 0) continue;
+          for (const p of s.pulls) {
+            if (need <= 0) break;
+            const remaining = sourceRemaining.get(p.inventoryId) ?? 0;
+            if (remaining <= 0) continue;
+            const take = Math.min(remaining, need);
+            lines.push({
+              source_tank_id: p.sourceTankId,
+              bull_catalog_id: s.bullCatalogId,
+              bull_name: s.bullName,
+              bull_code: s.naabCode,
+              source_canister: p.sourceCanister,
+              field_canister: d.fieldCanister.trim() || null,
+              units: take,
+            });
+            sourceRemaining.set(p.inventoryId, remaining - take);
+            need -= take;
+          }
+          if (need > 0) {
+            throw new Error(
+              `${s.bullName}: not enough inventory to fill ${d.units} units` +
+                (d.fieldCanister ? ` for canister ${d.fieldCanister}` : "") +
+                ".",
+            );
+          }
         }
       }
 
-      if (lines.length === 0) throw new Error("Add at least one pull amount.");
+      if (lines.length === 0) throw new Error("Add at least one canister with units.");
 
       const payload = {
         organization_id: organizationId,
@@ -566,9 +583,11 @@ export default function PackForProjectDialog({
               )}
 
               {bullSections.map((s) => {
-                const sectionPulled = s.pulls.reduce((sum, p) => sum + (Number(p.units) || 0), 0);
+                const sectionTotal = s.destinations.reduce((sum, d) => sum + (Number(d.units) || 0), 0);
+                const totalAvailable = s.pulls.reduce((sum, p) => sum + p.available, 0);
+                const overAlloc = sectionTotal > totalAvailable;
                 return (
-                  <div key={s.key} className="rounded-lg border border-border/60 p-3 space-y-2">
+                  <div key={s.key} className="rounded-lg border border-border/60 p-3 space-y-3">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <div className="min-w-0">
                         <div className="font-medium text-sm">
@@ -580,70 +599,94 @@ export default function PackForProjectDialog({
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {s.fromPlan ? `Need ${s.needed}` : "Not on any plan"}
-                          {sectionPulled > 0 && <> · Pulling {sectionPulled}</>}
+                          {sectionTotal > 0 && <> · Packing {sectionTotal}</>}
                           {s.projects.length > 1 && (
                             <> · <span className="text-foreground/70">{s.projects.join(", ")}</span></>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Label className="text-xs text-muted-foreground" htmlFor={`canister-${s.key}`}>Field can</Label>
-                        <Input
-                          id={`canister-${s.key}`}
-                          value={s.fieldCanister}
-                          onChange={(e) => updateSection(s.key, { fieldCanister: e.target.value })}
-                          className="h-8 w-20 text-xs"
-                          placeholder="—"
-                        />
-                        {!s.fromPlan && (
-                          <Button
-                            variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => removeExtraSection(s.key)}
-                            aria-label="Remove section"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
+                      {!s.fromPlan && (
+                        <Button
+                          variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => removeExtraSection(s.key)}
+                          aria-label="Remove section"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
 
+                    {/* Source inventory — display only. Allocation is FIFO at submit. */}
                     {s.pulls.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">No company inventory available for this bull.</p>
                     ) : (
-                      <div className="space-y-1">
+                      <div className="space-y-0.5 text-[11px] text-muted-foreground border-l-2 border-border/60 pl-2">
                         {s.pulls.map((p) => (
-                          <div key={p.inventoryId} className="flex items-center gap-2 text-xs">
-                            <div className="flex-1 min-w-0 truncate">
-                              <span className="font-medium">{p.sourceTankLabel}</span>
-                              {p.sourceCanister && <span className="text-muted-foreground"> · can {p.sourceCanister}</span>}
-                              <span className="ml-2 text-emerald-600">{p.available} avail</span>
-                            </div>
-                            <Label className="text-muted-foreground" htmlFor={`pull-${s.key}-${p.inventoryId}`}>Pull</Label>
-                            <Input
-                              id={`pull-${s.key}-${p.inventoryId}`}
-                              type="text"
-                              inputMode="numeric"
-                              value={p.units}
-                              placeholder="—"
-                              onChange={(e) => updatePull(s.key, p.inventoryId, e.target.value)}
-                              className="h-8 w-20 text-right text-xs"
-                            />
+                          <div key={p.inventoryId} className="flex items-center gap-2">
+                            <span className="font-medium text-foreground/80">{p.sourceTankLabel}</span>
+                            {p.sourceCanister && <span> · can {p.sourceCanister}</span>}
+                            <span className="ml-auto text-emerald-600 tabular-nums">{p.available} avail</span>
                           </div>
                         ))}
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <span className="text-foreground/70">Total available</span>
+                          <span className={`ml-auto tabular-nums font-medium ${overAlloc ? "text-destructive" : "text-foreground/80"}`}>
+                            {totalAvailable}
+                          </span>
+                        </div>
                       </div>
                     )}
 
+                    {/* Destination canisters — one row per field canister. */}
                     {s.pulls.length > 0 && (
-                      <div className="pt-1">
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Pack into</div>
+                        {s.destinations.map((d) => (
+                          <div key={d.id} className="flex items-center gap-2 text-xs">
+                            <Label className="text-muted-foreground" htmlFor={`fc-${s.key}-${d.id}`}>Field can</Label>
+                            <Input
+                              id={`fc-${s.key}-${d.id}`}
+                              value={d.fieldCanister}
+                              placeholder="—"
+                              onChange={(e) => updateDestination(s.key, d.id, { fieldCanister: e.target.value })}
+                              className="h-8 w-16 text-xs"
+                            />
+                            <Label className="text-muted-foreground ml-1" htmlFor={`du-${s.key}-${d.id}`}>Units</Label>
+                            <Input
+                              id={`du-${s.key}-${d.id}`}
+                              type="text"
+                              inputMode="numeric"
+                              value={d.units}
+                              placeholder="—"
+                              onChange={(e) => updateDestination(s.key, d.id, { units: e.target.value.replace(/[^0-9]/g, "") })}
+                              className="h-8 w-20 text-right text-xs"
+                            />
+                            {s.destinations.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeDestination(s.key, d.id)}
+                                className="text-destructive hover:text-destructive/80 text-base leading-none px-1"
+                                aria-label="Remove canister"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        ))}
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
-                          onClick={() => addCanisterSplit(s.key)}
+                          onClick={() => addDestination(s.key)}
                         >
-                          <Plus className="h-3 w-3 mr-1" /> Split into another canister
+                          <Plus className="h-3 w-3 mr-1" /> Add canister
                         </Button>
+                        {overAlloc && (
+                          <div className="text-[11px] text-destructive">
+                            Packing {sectionTotal} exceeds the {totalAvailable} units available for this bull.
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
