@@ -44,7 +44,7 @@ type PullRow = {
 };
 
 type BullSection = {
-  key: string;
+  key: string; // unique per section — same bull can have multiple sections (canister splits)
   bullCatalogId: string;
   bullName: string;
   naabCode: string | null;
@@ -54,6 +54,11 @@ type BullSection = {
   fromPlan: boolean;
   projects: string[]; // project names this bull is needed for
 };
+
+const newSectionKey = () =>
+  (typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `sec-${Math.random().toString(36).slice(2)}-${Date.now()}`);
 
 type ProjectOption = { id: string; name: string };
 
@@ -193,20 +198,24 @@ export default function PackForProjectDialog({
         }
       }
 
-      // Preserve user-entered pull amounts and field canisters across reloads
-      // by keying on bullCatalogId.
-      const prevByBull = new Map<string, BullSection>();
-      setBullSections((cur) => {
-        for (const s of cur) prevByBull.set(s.bullCatalogId, s);
-        return cur;
-      });
+      // Snapshot previous sections so we can preserve user-entered pull
+      // amounts, field canisters, and any manually-added duplicate sections
+      // for the same bull across reloads.
+      let prevSections: BullSection[] = [];
+      setBullSections((cur) => { prevSections = cur; return cur; });
+      const prevFromPlanByBull = new Map<string, BullSection>();
+      for (const s of prevSections) {
+        if (s.fromPlan && !prevFromPlanByBull.has(s.bullCatalogId)) {
+          prevFromPlanByBull.set(s.bullCatalogId, s);
+        }
+      }
 
       const sections: BullSection[] = [];
       let idx = 0;
       for (const [bullCatalogId, info] of byBull.entries()) {
         const inventory = await loadInventoryForBull(organizationId, bullCatalogId);
         if (cancelled) return;
-        const previous = prevByBull.get(bullCatalogId);
+        const previous = prevFromPlanByBull.get(bullCatalogId);
         idx += 1;
         // Merge previous pull amounts onto the freshly-loaded inventory rows.
         const prevPullByInv = new Map<string, string>();
@@ -216,7 +225,7 @@ export default function PackForProjectDialog({
           units: prevPullByInv.get(p.inventoryId) ?? "",
         }));
         sections.push({
-          key: bullCatalogId,
+          key: previous?.key ?? newSectionKey(),
           bullCatalogId,
           bullName: info.bullName,
           naabCode: info.naabCode,
@@ -228,11 +237,9 @@ export default function PackForProjectDialog({
         });
       }
 
-      // Carry over any extra (off-plan) bulls the user added manually.
-      const carryExtras: BullSection[] = [];
-      for (const [bullCatalogId, sec] of prevByBull.entries()) {
-        if (!sec.fromPlan && !byBull.has(bullCatalogId)) carryExtras.push(sec);
-      }
+      // Carry over every non-fromPlan section (off-plan extras AND
+      // duplicate canister-splits for plan bulls).
+      const carryExtras = prevSections.filter((s) => !s.fromPlan);
 
       if (!cancelled) {
         setBullSections([...sections, ...carryExtras]);
@@ -254,8 +261,32 @@ export default function PackForProjectDialog({
     ));
   };
 
+  // Removes any section by key — used for off-plan extras AND for the extra
+  // canister-split sections a user added on top of a planned bull.
   const removeExtraSection = (key: string) =>
     setBullSections((prev) => prev.filter((s) => !(s.key === key && !s.fromPlan)));
+
+  // Add another canister for an existing bull. Reuses the bull metadata from
+  // the source section but starts fresh with an empty field canister + pulls.
+  const addCanisterSplit = async (sourceKey: string) => {
+    const source = bullSections.find((s) => s.key === sourceKey);
+    if (!source) return;
+    const inventory = await loadInventoryForBull(organizationId, source.bullCatalogId);
+    setBullSections((prev) => [
+      ...prev,
+      {
+        key: newSectionKey(),
+        bullCatalogId: source.bullCatalogId,
+        bullName: source.bullName,
+        naabCode: source.naabCode,
+        needed: 0,
+        fieldCanister: "",
+        pulls: buildPulls(inventory),
+        fromPlan: false,
+        projects: source.projects,
+      },
+    ]);
+  };
 
   const handleAddExtraBull = async (
     _name: string,
@@ -264,10 +295,9 @@ export default function PackForProjectDialog({
   ) => {
     setAddingExtra(false);
     if (!catalogId) return;
-    if (bullSections.some((s) => s.bullCatalogId === catalogId)) {
-      toast({ title: "Already in the pack", description: "That bull is already listed." });
-      return;
-    }
+    // Duplicate bulls ARE allowed — same bull can go into multiple field
+    // canisters. The pack_tank RPC writes one tank_pack_lines row per pull
+    // and there's no unique constraint on (pack_id, bull_catalog_id).
     const inventory = await loadInventoryForBull(organizationId, catalogId);
     const { data: bullRow } = await supabase
       .from("bulls_catalog")
@@ -277,7 +307,7 @@ export default function PackForProjectDialog({
     setBullSections((prev) => [
       ...prev,
       {
-        key: catalogId,
+        key: newSectionKey(),
         bullCatalogId: catalogId,
         bullName: bullRow?.bull_name ?? _name,
         naabCode: bullRow?.naab_code ?? naabCode ?? null,
@@ -346,13 +376,39 @@ export default function PackForProjectDialog({
         units: number;
       }> = [];
 
+      // First pass: aggregate pulls per source inventory row so a bull
+      // split across multiple field canisters can't over-allocate from the
+      // same source slot. Capacity (available) is shared across sections.
+      const pullByInv = new Map<string, { units: number; available: number; label: string; bullName: string }>();
       for (const s of bullSections) {
         for (const p of s.pulls) {
           const units = Number(p.units) || 0;
           if (units <= 0) continue;
-          if (units > p.available) {
-            throw new Error(`${s.bullName}: pull (${units}) exceeds available (${p.available}) in ${p.sourceTankLabel}.`);
+          const entry = pullByInv.get(p.inventoryId);
+          if (entry) {
+            entry.units += units;
+          } else {
+            pullByInv.set(p.inventoryId, {
+              units,
+              available: p.available,
+              label: p.sourceTankLabel + (p.sourceCanister ? ` · can ${p.sourceCanister}` : ""),
+              bullName: s.bullName,
+            });
           }
+        }
+      }
+      for (const [, agg] of pullByInv) {
+        if (agg.units > agg.available) {
+          throw new Error(
+            `${agg.bullName}: total pull across canisters (${agg.units}) exceeds available (${agg.available}) in ${agg.label}.`,
+          );
+        }
+      }
+
+      for (const s of bullSections) {
+        for (const p of s.pulls) {
+          const units = Number(p.units) || 0;
+          if (units <= 0) continue;
           lines.push({
             source_tank_id: p.sourceTankId,
             bull_catalog_id: s.bullCatalogId,
@@ -537,12 +593,13 @@ export default function PackForProjectDialog({
                           value={s.fieldCanister}
                           onChange={(e) => updateSection(s.key, { fieldCanister: e.target.value })}
                           className="h-8 w-20 text-xs"
+                          placeholder="—"
                         />
                         {!s.fromPlan && (
                           <Button
                             variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
                             onClick={() => removeExtraSection(s.key)}
-                            aria-label="Remove extra bull"
+                            aria-label="Remove section"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -561,18 +618,32 @@ export default function PackForProjectDialog({
                               {p.sourceCanister && <span className="text-muted-foreground"> · can {p.sourceCanister}</span>}
                               <span className="ml-2 text-emerald-600">{p.available} avail</span>
                             </div>
-                            <Label className="text-muted-foreground" htmlFor={`pull-${p.inventoryId}`}>Pull</Label>
+                            <Label className="text-muted-foreground" htmlFor={`pull-${s.key}-${p.inventoryId}`}>Pull</Label>
                             <Input
-                              id={`pull-${p.inventoryId}`}
+                              id={`pull-${s.key}-${p.inventoryId}`}
                               type="text"
                               inputMode="numeric"
                               value={p.units}
-                              placeholder={String(p.available)}
+                              placeholder="—"
                               onChange={(e) => updatePull(s.key, p.inventoryId, e.target.value)}
                               className="h-8 w-20 text-right text-xs"
                             />
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {s.pulls.length > 0 && (
+                      <div className="pt-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() => addCanisterSplit(s.key)}
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> Split into another canister
+                        </Button>
                       </div>
                     )}
                   </div>
