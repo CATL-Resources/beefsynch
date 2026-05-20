@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, Fragment } from "react";
+import FindRoomDialog from "./FindRoomDialog";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -613,6 +614,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h3 className="text-xl font-bold font-display tracking-tight">Semen Inventory</h3>
         <div className="flex gap-2">
+          <FindRoomDialog />
           <Button variant="outline" className="gap-2" onClick={handleExportCsv}><FileSpreadsheet className="h-4 w-4" /> Export CSV</Button>
           <Button variant="outline" className="gap-2" onClick={handleExportPdf}><FileText className="h-4 w-4" /> Export PDF</Button>
         </div>
