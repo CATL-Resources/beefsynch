@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
@@ -121,14 +120,17 @@ export default function SemenPacked({ projectId }: SemenPackedProps) {
                   />
                 </td>
                 <td className="px-3 py-2 text-center">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 text-[11px] px-2"
+                  <button
+                    type="button"
                     onClick={() => toggleBillable(r.id, r.is_billable)}
+                    className={`inline-flex items-center justify-center rounded-full h-6 px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                      r.is_billable === false
+                        ? "bg-red-500/15 text-red-400 hover:bg-red-500/25"
+                        : "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
+                    }`}
                   >
                     {r.is_billable === false ? "No" : "Yes"}
-                  </Button>
+                  </button>
                 </td>
                 <td className="px-3 py-2">{companyBadge(r.semen_companies?.name)}</td>
               </tr>

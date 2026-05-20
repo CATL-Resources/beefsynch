@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -153,6 +153,48 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
   }, [invRows, sessionMeta]);
 
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
+
+  // One-shot auto-fill: once unpack populates session End values, push them
+  // into project_billing_semen.units_returned and recompute units_billable +
+  // line_total for any row the user clearly hasn't touched yet
+  // (units_returned still null or 0). Manual edits are preserved because we
+  // only write when units_returned is the default.
+  const autoFillDone = useRef(false);
+  useEffect(() => {
+    if (autoFillDone.current) return;
+    if (rows.length === 0 || suggestedReturnedByBull.size === 0) return;
+
+    const updates: Array<{ id: string; units_returned: number; units_billable: number; line_total: number }> = [];
+    for (const r of rows) {
+      const k = r.bull_catalog_id || r.bull_name;
+      const suggested = suggestedReturnedByBull.get(k);
+      if (suggested == null) continue;
+      if (r.units_returned !== 0 && r.units_returned !== null) continue; // user already edited
+      const packed = packedByBull.get(k) ?? r.units_packed ?? 0;
+      const blown = blownByBull.get(k) ?? r.units_blown ?? 0;
+      const returned = suggested;
+      const used = Math.max(0, packed - returned);
+      const billable = Math.max(0, used - blown);
+      const price = r.unit_price ?? 0;
+      const line_total = Number((billable * price).toFixed(2));
+      updates.push({ id: r.id, units_returned: returned, units_billable: billable, line_total });
+    }
+    if (updates.length === 0) return;
+    autoFillDone.current = true;
+    Promise.all(
+      updates.map((u) =>
+        supabase
+          .from("project_billing_semen")
+          .update({
+            units_returned: u.units_returned,
+            units_billable: u.units_billable,
+            line_total: u.line_total,
+          })
+          .eq("id", u.id),
+      ),
+    ).then(() => refetch());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, suggestedReturnedByBull, packedByBull, blownByBull]);
 
   // Auto-create semen rows once when pack lines exist but no semen rows do.
   useEffect(() => {

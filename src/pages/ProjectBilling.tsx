@@ -1233,12 +1233,14 @@ const ProjectBilling = () => {
         )}
 
         {projectId && billingId && (
-          <div className={hasPack ? "space-y-2" : "opacity-40 pointer-events-none space-y-2"}>
+          <div className="space-y-2">
             <ProtocolSchedule projectId={projectId} />
             <BillingProductsSection billingId={billingId} orgId={orgId} />
-            <SemenPacked projectId={projectId} />
-            <SemenSessions billingId={billingId} projectId={projectId} organizationId={orgId} />
-            <SemenBillable billingId={billingId} projectId={projectId} />
+            <div className={hasPack ? "space-y-2" : "opacity-40 pointer-events-none space-y-2"}>
+              <SemenPacked projectId={projectId} />
+              <SemenSessions billingId={billingId} projectId={projectId} organizationId={orgId} />
+              <SemenBillable billingId={billingId} projectId={projectId} />
+            </div>
             <BillingLabor billingId={billingId} />
             <BillingInvoices
               billingId={billingId}
