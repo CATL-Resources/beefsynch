@@ -22,7 +22,9 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { format, parseISO } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format, parseISO, differenceInCalendarDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
@@ -54,6 +56,65 @@ interface OrderRow {
   customers: { name: string; phone: string | null; email: string | null } | null;
   invoicing_company_id: string | null;
   semen_companies_invoicing?: { name: string } | null;
+  customer_request_date?: string | null;
+  needed_by?: string | null;
+  expected_ship_date?: string | null;
+  expected_arrival_date?: string | null;
+}
+
+function OrderDateField({
+  label, value, onSave, warnIfSoon,
+}: {
+  label: string;
+  value: string | null | undefined;
+  onSave: (d: Date | null) => void;
+  warnIfSoon?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const date = value ? parseISO(value) : null;
+  const isSoon = warnIfSoon && value
+    ? differenceInCalendarDays(parseISO(value), new Date()) <= 3
+    : false;
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "text-sm hover:underline tabular-nums",
+              date
+                ? isSoon ? "font-semibold text-destructive" : "font-medium text-foreground"
+                : "text-muted-foreground italic",
+            )}
+          >
+            {date ? format(date, date.getFullYear() === new Date().getFullYear() ? "MMM d" : "MMM d, yyyy") : "—"}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="end">
+          <Calendar
+            mode="single"
+            selected={date ?? undefined}
+            onSelect={(d) => { setOpen(false); onSave(d ?? null); }}
+            className="p-3 pointer-events-auto"
+          />
+          {date && (
+            <div className="px-3 pb-3">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs w-full"
+                onClick={() => { setOpen(false); onSave(null); }}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
 }
 
 interface ItemRow {
@@ -334,6 +395,42 @@ const SemenOrderDetail = () => {
     load();
   };
 
+  const advanceOrderStatus = async (next: "ordered" | "received") => {
+    if (!order) return;
+    const { error } = await supabase
+      .from("semen_orders")
+      .update({ order_status: next })
+      .eq("id", order.id);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: next === "ordered"
+        ? `Marked as ordered — ${format(new Date(), "MMM d")}`
+        : `Marked as received — ${format(new Date(), "MMM d")}`,
+    });
+    load();
+  };
+
+  const saveOrderDate = async (
+    field: "customer_request_date" | "needed_by" | "order_date" | "expected_ship_date" | "expected_arrival_date",
+    value: Date | null,
+  ) => {
+    if (!order) return;
+    const next = value ? format(value, "yyyy-MM-dd") : null;
+    const { error } = await supabase
+      .from("semen_orders")
+      .update({ [field]: next })
+      .eq("id", order.id);
+    if (error) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Saved" });
+    load();
+  };
+
   const revertOrderInvoiced = async () => {
     if (!order) return;
     if (!window.confirm("Are you sure? This will move the order back to the billable queue.")) return;
@@ -365,6 +462,7 @@ const SemenOrderDetail = () => {
       order_type: order.order_type,
       inventory_owner: (order as any).inventory_owner ?? null,
       needed_by: (order as any).needed_by ?? null,
+      customer_request_date: (order as any).customer_request_date ?? null,
       bulls: items.map((i) => ({
         name: i.bulls_catalog?.bull_name || i.custom_bull_name || "",
         catalogId: i.bull_catalog_id,
@@ -649,16 +747,37 @@ const SemenOrderDetail = () => {
             <Badge
               variant="outline"
               className={cn(
-                "capitalize text-xs",
+                "text-xs",
                 order.order_status === "received"
-                  ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
+                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
                   : order.order_status === "ordered"
-                    ? "bg-blue-500/15 text-blue-700 border-blue-500/30"
-                    : "bg-muted text-muted-foreground",
+                    ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                    : "bg-destructive/20 text-destructive border-destructive/30",
               )}
             >
-              {order.order_status.replace(/_/g, " ")}
+              {order.order_status === "not_ordered" ? "Not Ordered"
+                : order.order_status === "ordered" ? "Ordered"
+                : "Received"}
             </Badge>
+            {order.order_status === "not_ordered" && (
+              <Button
+                size="sm"
+                className="h-7 text-xs bg-amber-500 hover:bg-amber-500/90 text-white"
+                onClick={() => advanceOrderStatus("ordered")}
+              >
+                Mark as Ordered
+              </Button>
+            )}
+            {order.order_status === "ordered" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                onClick={() => advanceOrderStatus("received")}
+              >
+                Mark as Received
+              </Button>
+            )}
             <Badge variant="outline" className={cn("capitalize text-xs", fulfillmentColors[order.fulfillment_status] || "")}>
               {order.fulfillment_status.replace(/_/g, " ")}
             </Badge>
@@ -768,6 +887,41 @@ const SemenOrderDetail = () => {
             );
           })()}
         </div>
+
+        {/* Dates timeline */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Dates</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <OrderDateField
+              label="Requested"
+              value={order.customer_request_date}
+              onSave={(d) => saveOrderDate("customer_request_date", d)}
+            />
+            <OrderDateField
+              label="Needed by"
+              value={order.needed_by}
+              onSave={(d) => saveOrderDate("needed_by", d)}
+              warnIfSoon
+            />
+            <OrderDateField
+              label="Ordered"
+              value={order.order_date}
+              onSave={(d) => saveOrderDate("order_date", d)}
+            />
+            <OrderDateField
+              label="Shipped"
+              value={order.expected_ship_date}
+              onSave={(d) => saveOrderDate("expected_ship_date", d)}
+            />
+            <OrderDateField
+              label="Arrives"
+              value={order.expected_arrival_date}
+              onSave={(d) => saveOrderDate("expected_arrival_date", d)}
+            />
+          </CardContent>
+        </Card>
 
         {/* Details card — compact inline labels */}
         <Card>

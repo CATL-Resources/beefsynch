@@ -2051,6 +2051,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           customer_id: string | null
+          customer_request_date: string | null
           document_path: string | null
           expected_arrival_date: string | null
           expected_ship_date: string | null
@@ -2086,6 +2087,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
+          customer_request_date?: string | null
           document_path?: string | null
           expected_arrival_date?: string | null
           expected_ship_date?: string | null
@@ -2121,6 +2123,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
+          customer_request_date?: string | null
           document_path?: string | null
           expected_arrival_date?: string | null
           expected_ship_date?: string | null

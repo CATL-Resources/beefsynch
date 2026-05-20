@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { format, parseISO, isAfter, isBefore } from "date-fns";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { format, parseISO, isAfter, isBefore, differenceInCalendarDays } from "date-fns";
 import {
   Search, Plus, CalendarIcon, Package, DollarSign, Clock, ShoppingCart, ClipboardList, ChevronDown, ChevronRight, Check,
 } from "lucide-react";
@@ -16,13 +16,34 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { getBadgeClass } from "@/lib/badgeStyles";
 import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import ReceivingTab from "@/components/inventory/ReceivingTab";
 
 type ChipFilter = "all" | "open" | "needs_invoice" | "done";
+type OrderStatusFilter = "all" | "not_ordered" | "ordered" | "received";
 type Tier = "open" | "needs_invoice" | "done";
+
+const ORDER_STATUS_PILL: Record<string, { label: string; className: string }> = {
+  not_ordered: { label: "Not Ordered", className: "bg-destructive/20 text-destructive border-destructive/30" },
+  ordered: { label: "Ordered", className: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+  received: { label: "Received", className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+};
+
+const formatCompactDate = (iso: string | null | undefined) => {
+  if (!iso) return null;
+  const d = parseISO(iso);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return format(d, sameYear ? "MMM d" : "MMM d, yyyy");
+};
+
+const isNeededBySoon = (iso: string | null | undefined) => {
+  if (!iso) return false;
+  const days = differenceInCalendarDays(parseISO(iso), new Date());
+  return days <= 3;
+};
 
 const classify = (o: any): Tier | "cancelled" | null => {
   const f = o.fulfillment_status;
@@ -50,11 +71,13 @@ const classify = (o: any): Tier | "cancelled" | null => {
 const OrdersTab = ({ orgId }: { orgId: string }) => {
   const navigate = useNavigate();
   const { role } = useOrgRole();
+  const queryClient = useQueryClient();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editOrder, setEditOrder] = useState<EditOrderData | null>(null);
   const [search, setSearch] = useState("");
   const [chipFilter, setChipFilter] = useState<ChipFilter>("all");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [subTab, setSubTab] = useState<"customer" | "inventory" | "shipments">("customer");
@@ -64,9 +87,32 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   useEffect(() => {
     setSearch("");
     setChipFilter("all");
+    setOrderStatusFilter("all");
     setDateFrom(undefined);
     setDateTo(undefined);
   }, [subTab]);
+
+  const advanceOrderStatus = async (
+    e: React.MouseEvent,
+    orderId: string,
+    next: "ordered" | "received",
+  ) => {
+    e.stopPropagation();
+    const { error } = await supabase
+      .from("semen_orders")
+      .update({ order_status: next })
+      .eq("id", orderId);
+    if (error) {
+      toast({ title: "Couldn't update", description: error.message, variant: "destructive" });
+      return;
+    }
+    if (next === "ordered") {
+      toast({ title: `Marked as ordered — ${format(new Date(), "MMM d")}` });
+    } else {
+      toast({ title: `Marked as received — ${format(new Date(), "MMM d")}` });
+    }
+    queryClient.invalidateQueries({ queryKey: ["semen_orders", orgId] });
+  };
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["semen_orders", orgId],
@@ -184,25 +230,51 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
 
   const scopedOrders = subTab === "customer" ? customerOrders : inventoryOrders;
 
-  // Apply search + date filters (chip filter handled separately for tier rendering)
-  const baseFiltered = useMemo(() => scopedOrders.filter((o: any) => {
-    if (search) {
-      const q = search.toLowerCase();
-      const customerMatch = (o.customers?.name || "").toLowerCase().includes(q);
-      const bullMatch = (o.semen_order_items || []).some((item: any) =>
-        (item.bulls_catalog?.bull_name || "").toLowerCase().includes(q) ||
-        (item.custom_bull_name || "").toLowerCase().includes(q)
-      );
-      if (!customerMatch && !bullMatch) return false;
-    }
-    if (o.order_date) {
-      if (dateFrom && isBefore(parseISO(o.order_date), dateFrom)) return false;
-      if (dateTo && isAfter(parseISO(o.order_date), dateTo)) return false;
-    } else if (dateFrom || dateTo) {
-      return false;
-    }
-    return true;
-  }), [scopedOrders, search, dateFrom, dateTo]);
+  // Apply search + date + order_status filters (chip filter handled separately for tier rendering)
+  const baseFiltered = useMemo(() => {
+    const filtered = scopedOrders.filter((o: any) => {
+      if (orderStatusFilter !== "all") {
+        const status = o.order_status || "not_ordered";
+        if (status !== orderStatusFilter) return false;
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        const customerMatch = (o.customers?.name || "").toLowerCase().includes(q);
+        const bullMatch = (o.semen_order_items || []).some((item: any) =>
+          (item.bulls_catalog?.bull_name || "").toLowerCase().includes(q) ||
+          (item.custom_bull_name || "").toLowerCase().includes(q)
+        );
+        if (!customerMatch && !bullMatch) return false;
+      }
+      if (o.order_date) {
+        if (dateFrom && isBefore(parseISO(o.order_date), dateFrom)) return false;
+        if (dateTo && isAfter(parseISO(o.order_date), dateTo)) return false;
+      } else if (dateFrom || dateTo) {
+        return false;
+      }
+      return true;
+    });
+
+    // Default sort: not_ordered first, then by needed_by asc, then by
+    // customer_request_date asc. Falls back to created_at.
+    const orderStatusRank = (s: string | null | undefined) =>
+      s === "not_ordered" || !s ? 0 : s === "ordered" ? 1 : 2;
+    return [...filtered].sort((a: any, b: any) => {
+      const sa = orderStatusRank(a.order_status);
+      const sb = orderStatusRank(b.order_status);
+      if (sa !== sb) return sa - sb;
+      const an = a.needed_by ? parseISO(a.needed_by).getTime() : Number.POSITIVE_INFINITY;
+      const bn = b.needed_by ? parseISO(b.needed_by).getTime() : Number.POSITIVE_INFINITY;
+      if (an !== bn) return an - bn;
+      const ar = a.customer_request_date
+        ? parseISO(a.customer_request_date).getTime()
+        : a.created_at ? new Date(a.created_at).getTime() : Number.POSITIVE_INFINITY;
+      const br = b.customer_request_date
+        ? parseISO(b.customer_request_date).getTime()
+        : b.created_at ? new Date(b.created_at).getTime() : Number.POSITIVE_INFINITY;
+      return ar - br;
+    });
+  }, [scopedOrders, search, dateFrom, dateTo, orderStatusFilter]);
 
   // Group into tiers (most-recent first within tier — query already orders by order_date DESC)
   const grouped = useMemo(() => {
@@ -262,6 +334,12 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
     const totalUnitsRow = getOrderUnits(order.semen_order_items);
     const items = order.semen_order_items || [];
     const isUnfulfilled = !["fulfilled", "cancelled"].includes(order.fulfillment_status);
+    const orderStatus = (order.order_status || "not_ordered") as keyof typeof ORDER_STATUS_PILL;
+    const statusPill = ORDER_STATUS_PILL[orderStatus] ?? ORDER_STATUS_PILL.not_ordered;
+    const neededByLabel = formatCompactDate(order.needed_by);
+    const neededBySoon = isNeededBySoon(order.needed_by);
+    const requestedLabel = formatCompactDate(order.customer_request_date) ?? formatCompactDate(order.created_at);
+    const orderedLabel = formatCompactDate(order.order_date);
 
     return (
       <div
@@ -276,20 +354,8 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
               {order.semen_companies?.name && (
                 <span className="text-xs text-muted-foreground">{order.semen_companies.name}</span>
               )}
-              <span className="text-xs text-muted-foreground">·</span>
-              <span className="text-xs text-muted-foreground">{order.order_date ? format(parseISO(order.order_date), "MMM d, yyyy") : "—"}</span>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "capitalize text-[10px]",
-                  order.order_status === "received"
-                    ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30"
-                    : order.order_status === "ordered"
-                      ? "bg-blue-500/15 text-blue-700 border-blue-500/30"
-                      : "bg-muted text-muted-foreground",
-                )}
-              >
-                {(order.order_status || "not_ordered").replace(/_/g, " ")}
+              <Badge variant="outline" className={cn("text-[10px]", statusPill.className)}>
+                {statusPill.label}
               </Badge>
               <Badge variant="outline" className={cn("capitalize text-[10px]", getBadgeClass('orderFulfillment', order.fulfillment_status))}>
                 {order.fulfillment_status?.replace(/_/g, " ")}
@@ -305,10 +371,40 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                 </Badge>
               )}
             </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1.5 text-[11px] text-muted-foreground">
+              {requestedLabel && <span>Requested: <span className="text-foreground/80">{requestedLabel}</span></span>}
+              {neededByLabel && (
+                <span className={neededBySoon ? "font-semibold text-destructive" : ""}>
+                  Needed by: {neededByLabel}
+                </span>
+              )}
+              {orderedLabel && <span>Ordered: <span className="text-foreground/80">{orderedLabel}</span></span>}
+            </div>
           </div>
-          <div className="text-right shrink-0">
-            <div className="text-lg font-bold tabular-nums leading-none">{totalUnitsRow}</div>
-            <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">units</div>
+          <div className="flex flex-col items-end gap-1.5 shrink-0">
+            <div className="text-right">
+              <div className="text-lg font-bold tabular-nums leading-none">{totalUnitsRow}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">units</div>
+            </div>
+            {orderStatus === "not_ordered" && (
+              <Button
+                size="sm"
+                className="h-7 text-xs bg-amber-500 hover:bg-amber-500/90 text-white"
+                onClick={(e) => advanceOrderStatus(e, order.id, "ordered")}
+              >
+                Mark as Ordered
+              </Button>
+            )}
+            {orderStatus === "ordered" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                onClick={(e) => advanceOrderStatus(e, order.id, "received")}
+              >
+                Mark as Received
+              </Button>
+            )}
           </div>
         </div>
 
@@ -483,6 +579,35 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                   chipFilter === chip.key
                     ? "bg-primary text-primary-foreground"
                     : "bg-card/60 text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/40"
+                )}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Order-status filter */}
+          <div className="flex flex-wrap gap-2 items-center">
+            {([
+              { key: "all", label: "All Statuses" },
+              { key: "not_ordered", label: "Not Ordered" },
+              { key: "ordered", label: "Ordered" },
+              { key: "received", label: "Received" },
+            ] as { key: OrderStatusFilter; label: string }[]).map(chip => (
+              <button
+                key={chip.key}
+                onClick={() => setOrderStatusFilter(chip.key)}
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-medium transition-colors border",
+                  orderStatusFilter === chip.key
+                    ? chip.key === "not_ordered"
+                      ? "bg-destructive/20 text-destructive border-destructive/40"
+                      : chip.key === "ordered"
+                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        : chip.key === "received"
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                          : "bg-primary text-primary-foreground border-primary"
+                    : "bg-card/60 text-muted-foreground hover:text-foreground hover:bg-secondary/60 border-border/40"
                 )}
               >
                 {chip.label}
