@@ -309,7 +309,7 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                     return (
                       <Input
                         inputMode="numeric"
-                        className="h-7 w-[64px] text-right text-xs ml-auto"
+                        className="h-7 w-[64px] text-right text-[15px] font-medium text-emerald-500 ml-auto"
                         defaultValue={r.units_returned ?? ""}
                         placeholder={placeholder}
                         onBlur={(e) => {
@@ -321,8 +321,16 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                     );
                   })()}
                 </td>
-                <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">{used || "—"}</td>
-                <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">{blown || "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  <span className={used > 0 ? "text-emerald-500 font-medium text-[15px]" : "text-muted-foreground italic"}>
+                    {used || "—"}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  <span className={blown > 0 ? "text-destructive font-medium text-[15px]" : "text-muted-foreground italic"}>
+                    {blown || "—"}
+                  </span>
+                </td>
                 <td className="px-3 py-2 text-right">
                   <Input
                     inputMode="numeric"
@@ -349,7 +357,11 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                     }}
                   />
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.line_total)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  <span className={(r.line_total ?? 0) > 0 ? "text-emerald-500 font-medium text-[15px]" : "text-muted-foreground"}>
+                    {formatCurrency(r.line_total)}
+                  </span>
+                </td>
                 <td className="px-3 py-2">{companyBadge(r.semen_companies?.name)}</td>
               </tr>
             ))}

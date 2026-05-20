@@ -1251,12 +1251,12 @@ const ProjectBilling = () => {
         {projectId && billingId && (
           <div className="space-y-4">
             <ProtocolSchedule projectId={projectId} billingId={billingId} />
-            <BillingProductsSection billingId={billingId} orgId={orgId} />
             <div className={hasPack ? "space-y-4" : "opacity-40 pointer-events-none space-y-4"}>
               <SemenPacked projectId={projectId} />
               <SemenSessions billingId={billingId} projectId={projectId} organizationId={orgId} />
               <SemenBillable billingId={billingId} projectId={projectId} />
             </div>
+            <BillingProductsSection billingId={billingId} orgId={orgId} />
             <BillingInvoices
               billingId={billingId}
               onPrintWorksheet={handlePrintWorksheet}

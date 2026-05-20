@@ -277,9 +277,32 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
     return sessions.filter((s) => (s.session_date ?? "") > lastPgfDate);
   }, [sessions, lastPgfDate]);
 
+  // Stat cards across the top of this section.
+  const totalHead = visibleSessions.reduce((s, x) => s + (x.head_count ?? 0), 0);
+  const visibleInventory = inventory.filter((r) =>
+    visibleSessions.some((s) => s.id === r.session_id),
+  );
+  const totalUnitsUsed = visibleInventory.reduce(
+    (s, r) => s + Math.max(0, (r.start_units ?? 0) - (r.end_units ?? 0)),
+    0,
+  );
+  const totalBlown = visibleInventory.reduce((s, r) => s + (r.blown_units ?? 0), 0);
+
   return (
     <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
       <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Semen: Used by Session</h2>
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { label: "Total head", value: totalHead, color: "text-foreground" },
+          { label: "Total units used", value: totalUnitsUsed, color: "text-emerald-500" },
+          { label: "Blown", value: totalBlown, color: totalBlown > 0 ? "text-destructive" : "text-muted-foreground" },
+        ].map((c) => (
+          <div key={c.label} className="rounded-lg bg-muted/30 px-3 py-2 text-center">
+            <div className={`text-[28px] font-medium leading-none tabular-nums ${c.color}`}>{c.value}</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground mt-1">{c.label}</div>
+          </div>
+        ))}
+      </div>
       {visibleSessions.length === 0 ? (
         <p className="text-sm text-muted-foreground italic">
           No breeding sessions yet

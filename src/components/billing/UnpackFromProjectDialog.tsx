@@ -94,7 +94,7 @@ export default function UnpackFromProjectDialog({
         billingId
           ? supabase
               .from("project_billing_session_inventory")
-              .select("bull_catalog_id, start_units, end_units")
+              .select("bull_catalog_id, start_units, end_units, session_id, project_billing_sessions!inner(sort_order, session_date)")
               .eq("billing_id", billingId)
           : Promise.resolve({ data: [] as any[], error: null }),
       ]);
@@ -119,18 +119,37 @@ export default function UnpackFromProjectDialog({
         if (extras) augmented = [...destTanks, ...(extras as TankOption[])];
       }
 
-      // Sum used (start - end) per bull across all sessions.
-      const usedRows = (usedRes.data ?? []) as Array<{ bull_catalog_id: string | null; start_units: number | null; end_units: number | null }>;
-      const usedByBull = new Map<string, number>();
-      for (const r of usedRows) {
+      // Remaining = the last session's End value for that bull. Summing
+      // (start - end) across sessions double-counts whenever sessions don't
+      // chain cleanly (a PM session that re-starts from the packed value
+      // instead of the previous End). Treating NULL end_units as 0 also
+      // marked incomplete sessions as 100% used.
+      const usedRows = (usedRes.data ?? []) as Array<{
+        bull_catalog_id: string | null;
+        end_units: number | null;
+        project_billing_sessions?: { sort_order: number | null; session_date: string | null } | null;
+      }>;
+      const lastEndByBull = new Map<string, number>();
+      const sorted = usedRows
+        .filter((r) => r.bull_catalog_id && r.end_units != null)
+        .slice()
+        .sort((a, b) => {
+          const aOrd = a.project_billing_sessions?.sort_order ?? 0;
+          const bOrd = b.project_billing_sessions?.sort_order ?? 0;
+          if (aOrd !== bOrd) return bOrd - aOrd;
+          const aDate = a.project_billing_sessions?.session_date ?? "";
+          const bDate = b.project_billing_sessions?.session_date ?? "";
+          return bDate.localeCompare(aDate);
+        });
+      for (const r of sorted) {
         if (!r.bull_catalog_id) continue;
-        const used = Math.max(0, (r.start_units ?? 0) - (r.end_units ?? 0));
-        usedByBull.set(r.bull_catalog_id, (usedByBull.get(r.bull_catalog_id) ?? 0) + used);
+        if (!lastEndByBull.has(r.bull_catalog_id)) {
+          lastEndByBull.set(r.bull_catalog_id, r.end_units ?? 0);
+        }
       }
 
-      // Roll up packed totals per bull, then distribute used proportionally
-      // across each pack line for that bull so split pulls each carry a
-      // share of the remaining.
+      // Roll up packed totals per bull so split pulls can divvy the
+      // remaining proportionally.
       const packedByBull = new Map<string, number>();
       for (const l of lines) {
         if (!l.bull_catalog_id) continue;
@@ -139,10 +158,14 @@ export default function UnpackFromProjectDialog({
 
       const rows: ReturnRow[] = lines.map((l) => {
         const totalPacked = l.bull_catalog_id ? packedByBull.get(l.bull_catalog_id) ?? 0 : (l.units ?? 0);
-        const totalUsed = l.bull_catalog_id ? usedByBull.get(l.bull_catalog_id) ?? 0 : 0;
-        // Proportional share of the bull's used count for this specific pack line.
-        const shareUsed = totalPacked > 0 ? Math.round((totalUsed * (l.units ?? 0)) / totalPacked) : 0;
-        const remaining = Math.max(0, (l.units ?? 0) - shareUsed);
+        const lastEnd = l.bull_catalog_id ? lastEndByBull.get(l.bull_catalog_id) : undefined;
+        // Proportional share of the bull's remaining for this specific pack
+        // line. If no session has reported End yet, all of it is still here.
+        const remaining = lastEnd == null
+          ? (l.units ?? 0)
+          : totalPacked > 0
+            ? Math.round((lastEnd * (l.units ?? 0)) / totalPacked)
+            : (l.units ?? 0);
         return {
           packLineId: l.id,
           bullCatalogId: l.bull_catalog_id,

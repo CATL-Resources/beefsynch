@@ -157,40 +157,33 @@ export default function BillingProducts({ billingId, orgId }: BillingProductsPro
         <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="text-left px-3 py-2 font-medium w-[140px]">Event</th>
+              <th className="text-left px-3 py-2 font-medium w-[120px]">Event</th>
               <th className="text-left px-3 py-2 font-medium">Product</th>
-              <th className="text-right px-3 py-2 font-medium w-[70px]">Doses</th>
-              <th className="text-right px-3 py-2 font-medium w-[90px]">Units</th>
+              <th className="text-right px-3 py-2 font-medium w-[90px]">Qty</th>
               <th className="text-right px-3 py-2 font-medium w-[90px]">Price</th>
+              <th className="text-left px-3 py-2 font-medium w-[150px]">Delivery</th>
               <th className="text-right px-3 py-2 font-medium w-[90px]">Total</th>
-              <th className="text-left px-3 py-2 font-medium w-[140px]">Delivery</th>
               <th className="w-[36px]" />
             </tr>
           </thead>
           <tbody>
             {lines.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-4 text-center text-muted-foreground">No products yet.</td></tr>
+              <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No products yet.</td></tr>
             ) : lines.map((l) => (
               <tr key={l.id} className="border-t border-border/40">
                 <td className="px-3 py-2 text-xs text-muted-foreground truncate">{l.protocol_event_label || "—"}</td>
-                <td className="px-3 py-2 font-medium truncate">{l.product_name}</td>
-                <td className="px-3 py-2 text-right">
-                  <Input
-                    inputMode="numeric"
-                    className="h-7 w-[60px] text-right text-xs ml-auto"
-                    defaultValue={l.doses ?? ""}
-                    placeholder="—"
-                    onBlur={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
-                      if (v === l.doses) return;
-                      saveField(l, { doses: v });
-                    }}
-                  />
+                <td className="px-3 py-2">
+                  <div className="font-medium truncate">{l.product_name}</div>
+                  {(l.doses_per_unit ?? 0) > 1 && (
+                    <div className="text-[10px] text-muted-foreground/60">
+                      {l.doses_per_unit} doses/{l.unit_label || "unit"}
+                    </div>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right">
                   <Input
                     inputMode="decimal"
-                    className="h-7 w-[80px] text-right text-xs ml-auto"
+                    className="h-7 w-[80px] text-right text-[15px] font-medium text-emerald-500 ml-auto"
                     defaultValue={l.units_billed ?? ""}
                     placeholder="—"
                     onBlur={(e) => {
@@ -213,7 +206,6 @@ export default function BillingProducts({ billingId, orgId }: BillingProductsPro
                     }}
                   />
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(l.line_total)}</td>
                 <td className="px-3 py-2">
                   <Select
                     value={l.delivery_method ?? "not_yet"}
@@ -228,6 +220,11 @@ export default function BillingProducts({ billingId, orgId }: BillingProductsPro
                       ))}
                     </SelectContent>
                   </Select>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  <span className={(l.line_total ?? 0) > 0 ? "text-emerald-500 font-medium text-[15px]" : "text-muted-foreground"}>
+                    {formatCurrency(l.line_total)}
+                  </span>
                 </td>
                 <td className="px-2 py-2 text-right">
                   <button

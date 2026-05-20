@@ -116,7 +116,7 @@ export default function SemenSessionCard({
                 <td className="px-3 py-1.5 text-right">
                   <Input
                     inputMode="numeric"
-                    className="h-6 w-[64px] text-right text-xs ml-auto"
+                    className="h-6 w-[64px] text-right text-[15px] font-medium text-emerald-500 ml-auto"
                     defaultValue={r.end_units ?? ""}
                     placeholder="—"
                     onBlur={(e) => {
@@ -134,13 +134,17 @@ export default function SemenSessionCard({
                     }}
                   />
                 </td>
-                <td className="px-3 py-1.5 text-right italic text-muted-foreground tabular-nums">
-                  {used != null && used !== 0 ? used : "—"}
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  <span className={used != null && used !== 0 ? "text-emerald-500 font-medium text-[15px]" : "text-muted-foreground italic"}>
+                    {used != null && used !== 0 ? used : "—"}
+                  </span>
                 </td>
                 <td className="px-3 py-1.5 text-right">
                   <Input
                     inputMode="numeric"
-                    className="h-6 w-[64px] text-right text-xs ml-auto"
+                    className={`h-6 w-[64px] text-right ml-auto ${
+                      (r.blown_units ?? 0) > 0 ? "text-destructive font-medium text-[15px]" : "text-xs"
+                    }`}
                     defaultValue={r.blown_units ?? ""}
                     placeholder="—"
                     onBlur={(e) => {
