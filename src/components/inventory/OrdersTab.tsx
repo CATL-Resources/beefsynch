@@ -74,7 +74,7 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("semen_orders")
-        .select("*, customers!semen_orders_customer_id_fkey(id, name), semen_companies!semen_orders_semen_company_id_fkey(name), semen_order_items(id, units, custom_bull_name, bull_catalog_id, bulls_catalog(bull_name))")
+        .select("*, customers!semen_orders_customer_id_fkey(id, name), semen_companies!semen_orders_semen_company_id_fkey(name), semen_order_items(id, units, custom_bull_name, bull_catalog_id, bulls_catalog(bull_name)), product_order_items(id, quantity, product_name)")
         .eq("organization_id", orgId)
         .order("order_date", { ascending: false });
       if (error) throw error;
@@ -331,6 +331,15 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                 </div>
               );
             })}
+          </div>
+        )}
+        {Array.isArray((order as any).product_order_items) && (order as any).product_order_items.length > 0 && (
+          <div className="space-y-0.5 pl-0.5 text-xs text-muted-foreground">
+            {(order as any).product_order_items.map((p: any) => (
+              <div key={p.id} className="truncate">
+                {p.quantity} {p.product_name}
+              </div>
+            ))}
           </div>
         )}
         {items.length === 0 && (

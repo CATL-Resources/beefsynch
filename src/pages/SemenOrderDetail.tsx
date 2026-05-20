@@ -32,6 +32,7 @@ import { InvoiceOrderModal } from "@/components/orders/InvoiceOrderModal";
 import { MarkFulfilledModal } from "@/components/orders/MarkFulfilledModal";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import ReceiveDialog from "@/components/orders/ReceiveDialog";
+import ProductOrderItemsSection from "@/components/orders/ProductOrderItemsSection";
 
 interface OrderRow {
   id: string;
@@ -1214,6 +1215,11 @@ const SemenOrderDetail = () => {
             )}
           </CardContent>
         </Card>
+        )}
+
+        {/* Products & supplies — new order_product_items table */}
+        {id && (
+          <ProductOrderItemsSection orderId={id} orgId={orgId} />
         )}
 
         {/* Supplies card */}

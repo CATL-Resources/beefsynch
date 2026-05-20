@@ -56,7 +56,8 @@ const Billable = () => {
       .select(`
         id, order_date, invoicing_company_id,
         customers!semen_orders_customer_id_fkey(name),
-        semen_order_items(units, bull_catalog_id, custom_bull_name, bulls_catalog(bull_name, naab_code))
+        semen_order_items(units, bull_catalog_id, custom_bull_name, bulls_catalog(bull_name, naab_code)),
+        product_order_items(quantity, product_name, line_total)
       `)
       .eq("organization_id", orgId)
       .eq("order_type", "customer")
@@ -66,10 +67,15 @@ const Billable = () => {
 
     const mappedOrders: BillableOrder[] = (orderRows ?? []).map((o: any) => {
       const items = o.semen_order_items || [];
+      const products = o.product_order_items || [];
       const total = items.reduce((s: number, i: any) => s + (i.units || 0), 0);
-      const summary = items
+      const semenSummary = items
         .map((i: any) => `${i.units} ${getBullDisplayLabel(i)}`)
         .join(" + ");
+      const productSummary = products
+        .map((p: any) => `${p.quantity} ${p.product_name}`)
+        .join(" + ");
+      const summary = [semenSummary, productSummary].filter(Boolean).join(" + ");
       return {
         id: o.id,
         order_date: o.order_date,
