@@ -1131,6 +1131,18 @@ const ProjectBilling = () => {
                     project.breeding_date ? format(parseISO(project.breeding_date), "MMM d, yyyy") : null,
                   ].filter(Boolean).join(" · ")}
                 </p>
+                {projectBulls.length > 0 && (
+                  <p className="text-[13px] text-muted-foreground mt-0.5">
+                    Bulls:{" "}
+                    <span className="font-medium text-foreground">
+                      {projectBulls.map((b: any) => {
+                        const name = b.bulls_catalog?.bull_name || b.custom_bull_name || "Unknown";
+                        const code = b.bulls_catalog?.naab_code;
+                        return code ? `${name} (${code})` : name;
+                      }).join(", ")}
+                    </span>
+                  </p>
+                )}
                 {hasPack && firstPack?.tanks && (
                   <p className="text-[13px] text-muted-foreground mt-0.5">
                     Field tank: <span className="font-medium text-foreground">
@@ -1138,6 +1150,11 @@ const ProjectBilling = () => {
                         ? `${firstPack.tanks.tank_name} (#${firstPack.tanks.tank_number})`
                         : `Tank #${firstPack.tanks.tank_number}`}
                     </span>
+                  </p>
+                )}
+                {project.notes && (
+                  <p className="text-[13px] text-amber-500/80 mt-1 italic">
+                    {project.notes}
                   </p>
                 )}
               </div>
