@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -40,13 +39,17 @@ type CatalogProduct = {
   doses_per_unit: number | null;
 };
 
-const DELIVERY_OPTIONS = [
-  { value: "not_yet", label: "Not Done" },
-  { value: "delivered", label: "Delivered" },
-  { value: "customer_pickup", label: "Customer Picked Up" },
-  { value: "customer_administered", label: "Customer Administered" },
-  { value: "catl_administered", label: "CATL Administered" },
+const DELIVERY_CYCLE = [
+  { value: "not_yet", label: "Not Done", className: "bg-gray-500/15 text-gray-400 hover:bg-gray-500/25" },
+  { value: "delivered", label: "Delivered", className: "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25" },
+  { value: "customer_pickup", label: "Cust Pickup", className: "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25" },
+  { value: "customer_administered", label: "Cust Admin", className: "bg-amber-500/15 text-amber-400 hover:bg-amber-500/25" },
+  { value: "catl_administered", label: "CATL Admin", className: "bg-purple-500/15 text-purple-400 hover:bg-purple-500/25" },
 ];
+const nextDelivery = (current: string | null | undefined) => {
+  const i = DELIVERY_CYCLE.findIndex((d) => d.value === (current || "not_yet"));
+  return DELIVERY_CYCLE[(i + 1) % DELIVERY_CYCLE.length].value;
+};
 
 const formatCurrency = (n: number | null | undefined) =>
   n == null ? "—" : `$${Number(n).toFixed(2)}`;
@@ -157,87 +160,85 @@ export default function BillingProducts({ billingId, orgId }: BillingProductsPro
         <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="text-left px-3 py-2 font-medium w-[120px]">Event</th>
               <th className="text-left px-3 py-2 font-medium">Product</th>
-              <th className="text-right px-3 py-2 font-medium w-[90px]">Qty</th>
-              <th className="text-right px-3 py-2 font-medium w-[90px]">Price</th>
-              <th className="text-left px-3 py-2 font-medium w-[150px]">Delivery</th>
+              <th className="text-right px-3 py-2 font-medium w-[70px]">Qty</th>
+              <th className="text-right px-3 py-2 font-medium w-[80px]">Price</th>
+              <th className="text-left px-3 py-2 font-medium w-[130px]">Delivery</th>
               <th className="text-right px-3 py-2 font-medium w-[90px]">Total</th>
               <th className="w-[36px]" />
             </tr>
           </thead>
           <tbody>
             {lines.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No products yet.</td></tr>
-            ) : lines.map((l) => (
-              <tr key={l.id} className="border-t border-border/40">
-                <td className="px-3 py-2 text-xs text-muted-foreground truncate">{l.protocol_event_label || "—"}</td>
-                <td className="px-3 py-2">
-                  <div className="font-medium truncate">{l.product_name}</div>
-                  {(l.doses_per_unit ?? 0) > 1 && (
-                    <div className="text-[10px] text-muted-foreground/60">
-                      {l.doses_per_unit} doses/{l.unit_label || "unit"}
-                    </div>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <Input
-                    inputMode="decimal"
-                    className="h-7 w-[80px] text-right text-[15px] font-medium text-emerald-500 ml-auto"
-                    defaultValue={l.units_billed ?? ""}
-                    placeholder="—"
-                    onBlur={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
-                      if (v === l.units_billed) return;
-                      saveField(l, { units_billed: v });
-                    }}
-                  />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <Input
-                    inputMode="decimal"
-                    className="h-7 w-[80px] text-right text-xs ml-auto"
-                    defaultValue={l.unit_price ?? ""}
-                    placeholder="—"
-                    onBlur={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
-                      if (v === l.unit_price) return;
-                      saveField(l, { unit_price: v });
-                    }}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <Select
-                    value={l.delivery_method ?? "not_yet"}
-                    onValueChange={(v) => saveField(l, { delivery_method: v })}
-                  >
-                    <SelectTrigger className="h-7 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DELIVERY_OPTIONS.map((d) => (
-                        <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  <span className={(l.line_total ?? 0) > 0 ? "text-emerald-500 font-medium text-[15px]" : "text-muted-foreground"}>
-                    {formatCurrency(l.line_total)}
-                  </span>
-                </td>
-                <td className="px-2 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => removeLine(l.id)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label="Remove"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
+              <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No products yet.</td></tr>
+            ) : lines.map((l) => {
+              const delivery = DELIVERY_CYCLE.find((d) => d.value === (l.delivery_method || "not_yet")) ?? DELIVERY_CYCLE[0];
+              return (
+                <tr key={l.id} className="border-t border-border/40">
+                  <td className="px-3 py-2">
+                    <span className="font-medium">{l.product_name}</span>
+                    {l.protocol_event_label && l.protocol_event_label !== "—" && (
+                      <span className="ml-2 text-[10px] text-muted-foreground">{l.protocol_event_label}</span>
+                    )}
+                    {(l.doses_per_unit ?? 0) > 1 && (
+                      <div className="text-[10px] text-muted-foreground/60">
+                        {l.doses_per_unit} doses/{l.unit_label || "unit"}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Input
+                      inputMode="decimal"
+                      className="h-7 w-14 text-right text-[15px] font-medium text-emerald-500 ml-auto"
+                      defaultValue={l.units_billed ?? ""}
+                      placeholder="—"
+                      onBlur={(e) => {
+                        const v = e.target.value === "" ? null : Number(e.target.value);
+                        if (v === l.units_billed) return;
+                        saveField(l, { units_billed: v });
+                      }}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Input
+                      inputMode="decimal"
+                      className="h-7 w-[72px] text-right text-xs ml-auto"
+                      defaultValue={l.unit_price ?? ""}
+                      placeholder="—"
+                      onBlur={(e) => {
+                        const v = e.target.value === "" ? null : Number(e.target.value);
+                        if (v === l.unit_price) return;
+                        saveField(l, { unit_price: v });
+                      }}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => saveField(l, { delivery_method: nextDelivery(l.delivery_method) })}
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors ${delivery.className}`}
+                    >
+                      {delivery.label}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <span className={(l.line_total ?? 0) > 0 ? "text-emerald-500 font-medium text-[15px]" : "text-muted-foreground"}>
+                      {formatCurrency(l.line_total)}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => removeLine(l.id)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label="Remove"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -263,13 +264,6 @@ export default function BillingProducts({ billingId, orgId }: BillingProductsPro
           </SelectContent>
         </Select>
       </div>
-      {lines.some((l) => l.delivery_method) && (
-        <div className="flex flex-wrap gap-1.5">
-          {Array.from(new Set(lines.map((l) => l.delivery_method).filter(Boolean))).map((d) => (
-            <Badge key={d} variant="outline" className="text-xs capitalize">{(d || "").replace(/_/g, " ")}</Badge>
-          ))}
-        </div>
-      )}
     </section>
   );
 }
