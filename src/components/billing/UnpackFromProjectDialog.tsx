@@ -267,15 +267,15 @@ export default function UnpackFromProjectDialog({
       const result = data as { ok?: boolean; lines_processed?: number } | null;
       if (!result?.ok) throw new Error("Unpack failed: invalid response from server");
 
-      // Unpacking flips the project into Work Complete and stamps the
-      // billing record. We only advance Confirmed projects so an already-
-      // invoiced project doesn't get rolled back.
+      // Unpacking flips the project into "Ready to Bill" and stamps the
+      // billing record. Only advance from pre-billing stages so an
+      // already-invoiced project doesn't get rolled back.
       if (projectId) {
         await supabase
           .from("projects")
-          .update({ status: "Work Complete" })
+          .update({ status: "Ready to Bill" })
           .eq("id", projectId)
-          .eq("status", "Confirmed");
+          .in("status", ["Tentative", "Confirmed", "In Field"]);
       }
       if (billingId) {
         const userId = (await supabase.auth.getUser()).data.user?.id || null;

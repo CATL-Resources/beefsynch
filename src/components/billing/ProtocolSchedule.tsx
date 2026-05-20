@@ -6,10 +6,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import SectionHeader from "./SectionHeader";
 
 interface ProtocolScheduleProps {
   projectId: string;
   billingId: string;
+  isEditing: boolean;
+  onToggleEdit: () => void;
+  locked: boolean;
 }
 
 type EventRow = {
@@ -28,7 +32,7 @@ type LaborRow = {
 
 const EXCLUDED = new Set(["Return Heat", "Estimated Calving"]);
 
-export default function ProtocolSchedule({ projectId, billingId }: ProtocolScheduleProps) {
+export default function ProtocolSchedule({ projectId, billingId, isEditing, onToggleEdit, locked }: ProtocolScheduleProps) {
   const queryClient = useQueryClient();
 
   const { data: events = [], isLoading } = useQuery({
@@ -137,8 +141,8 @@ export default function ProtocolSchedule({ projectId, billingId }: ProtocolSched
   };
 
   return (
-    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
-      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Protocol &amp; Labor</h2>
+    <section className={`rounded-xl border bg-card/50 p-4 space-y-4 ${isEditing ? "border-primary/40 ring-1 ring-primary/30" : "border-border"}`}>
+      <SectionHeader title="Protocol & Labor" isEditing={isEditing} onToggleEdit={onToggleEdit} locked={locked} />
 
       <div className="rounded-lg border border-border/60 overflow-hidden">
         <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
@@ -156,12 +160,16 @@ export default function ProtocolSchedule({ projectId, billingId }: ProtocolSched
             ) : visible.map((e) => (
               <tr key={e.id} className="border-t border-border/40">
                 <td className="px-3 py-2">
-                  <Input
-                    type="date"
-                    className="h-7 w-[140px] text-sm"
-                    defaultValue={e.event_date ?? ""}
-                    onBlur={(ev) => saveDate(e.id, e.event_date, ev.target.value)}
-                  />
+                  {isEditing ? (
+                    <Input
+                      type="date"
+                      className="h-7 w-[140px] text-sm"
+                      defaultValue={e.event_date ?? ""}
+                      onBlur={(ev) => saveDate(e.id, e.event_date, ev.target.value)}
+                    />
+                  ) : (
+                    <span className="text-sm">{e.event_date ?? "—"}</span>
+                  )}
                 </td>
                 <td className="px-3 py-2 font-medium">
                   {e.event_name}
@@ -179,54 +187,70 @@ export default function ProtocolSchedule({ projectId, billingId }: ProtocolSched
 
       <div className="space-y-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Labor</h3>
+        {labor.length === 0 && !isEditing && (
+          <p className="text-sm text-muted-foreground italic">No labor entries.</p>
+        )}
         {labor.map((l) => (
-          <div key={l.id} className="flex items-start gap-2">
-            <Input
-              className="h-8 w-[180px] text-sm"
-              defaultValue={l.labor_dates ?? ""}
-              placeholder="Dates"
-              onBlur={(ev) => {
-                const v = ev.target.value || null;
-                if (v === l.labor_dates) return;
-                saveLabor(l.id, { labor_dates: v });
-              }}
-            />
-            <Input
-              className="h-8 flex-1 text-sm"
-              defaultValue={l.description ?? ""}
-              placeholder="What work did we do?"
-              onBlur={(ev) => {
-                const v = ev.target.value || null;
-                if (v === l.description) return;
-                saveLabor(l.id, { description: v });
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => removeLabor(l.id)}
-              className="text-muted-foreground hover:text-destructive mt-1.5"
-              aria-label="Remove labor"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
+          isEditing ? (
+            <div key={l.id} className="flex items-start gap-2">
+              <Input
+                className="h-8 w-[180px] text-sm"
+                defaultValue={l.labor_dates ?? ""}
+                placeholder="Dates"
+                onBlur={(ev) => {
+                  const v = ev.target.value || null;
+                  if (v === l.labor_dates) return;
+                  saveLabor(l.id, { labor_dates: v });
+                }}
+              />
+              <Input
+                className="h-8 flex-1 text-sm"
+                defaultValue={l.description ?? ""}
+                placeholder="What work did we do?"
+                onBlur={(ev) => {
+                  const v = ev.target.value || null;
+                  if (v === l.description) return;
+                  saveLabor(l.id, { description: v });
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => removeLabor(l.id)}
+                className="text-muted-foreground hover:text-destructive mt-1.5"
+                aria-label="Remove labor"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div key={l.id} className="text-sm flex gap-3">
+              <span className="text-muted-foreground w-[180px] shrink-0">{l.labor_dates || "—"}</span>
+              <span>{l.description || "—"}</span>
+            </div>
+          )
         ))}
-        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={addLabor}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Add labor note
-        </Button>
+        {isEditing && (
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={addLabor}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Add labor note
+          </Button>
+        )}
       </div>
 
       <div className="space-y-1">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notes</h3>
-        <Textarea
-          className="min-h-[80px] text-sm"
-          defaultValue={billing?.notes ?? ""}
-          placeholder="Add notes..."
-          onBlur={(e) => {
-            if ((e.target.value || "") === (billing?.notes || "")) return;
-            saveNotes(e.target.value);
-          }}
-        />
+        {isEditing ? (
+          <Textarea
+            className="min-h-[80px] text-sm"
+            defaultValue={billing?.notes ?? ""}
+            placeholder="Add notes..."
+            onBlur={(e) => {
+              if ((e.target.value || "") === (billing?.notes || "")) return;
+              saveNotes(e.target.value);
+            }}
+          />
+        ) : (
+          <p className="text-sm whitespace-pre-wrap">{billing?.notes || <span className="text-muted-foreground italic">No notes.</span>}</p>
+        )}
       </div>
     </section>
   );

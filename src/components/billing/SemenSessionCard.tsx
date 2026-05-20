@@ -21,11 +21,12 @@ interface SemenSessionCardProps {
   rows: InventoryRow[];
   onSessionField: (id: string, field: "session_date" | "head_count", value: any) => void;
   onCellChange: (rowId: string, field: "start_units" | "end_units" | "blown_units", value: number | null) => void;
+  isEditing?: boolean;
 }
 
 export default function SemenSessionCard({
   sessionId, index, date, headCount, rows,
-  onSessionField, onCellChange,
+  onSessionField, onCellChange, isEditing = true,
 }: SemenSessionCardProps) {
   return (
     <div className="rounded-lg border border-border/60 overflow-hidden">
@@ -35,6 +36,7 @@ export default function SemenSessionCard({
           <span className="text-sm text-muted-foreground">—</span>
           <Input
             type="date"
+            disabled={!isEditing}
             className="h-7 w-[140px] text-sm"
             defaultValue={date ?? ""}
             onBlur={(e) => {
@@ -56,6 +58,7 @@ export default function SemenSessionCard({
           Head
           <Input
             inputMode="numeric"
+            disabled={!isEditing}
             className="h-7 w-[64px] text-right text-xs"
             defaultValue={headCount ?? ""}
             placeholder="—"
@@ -95,6 +98,7 @@ export default function SemenSessionCard({
                 <td className="px-3 py-1.5 text-right">
                   <Input
                     inputMode="numeric"
+                    disabled={!isEditing}
                     className="h-6 w-[64px] text-right text-xs ml-auto"
                     defaultValue={r.start_units ?? ""}
                     placeholder="—"
@@ -116,6 +120,7 @@ export default function SemenSessionCard({
                 <td className="px-3 py-1.5 text-right">
                   <Input
                     inputMode="numeric"
+                    disabled={!isEditing}
                     className="h-6 w-[64px] text-right text-[15px] font-medium text-emerald-500 ml-auto"
                     defaultValue={r.end_units ?? ""}
                     placeholder="—"
@@ -142,6 +147,7 @@ export default function SemenSessionCard({
                 <td className="px-3 py-1.5 text-right">
                   <Input
                     inputMode="numeric"
+                    disabled={!isEditing}
                     className={`h-6 w-[64px] text-right ml-auto ${
                       (r.blown_units ?? 0) > 0 ? "text-destructive font-medium text-[15px]" : "text-xs"
                     }`}

@@ -1,10 +1,11 @@
 // Centralized badge style definitions
 export const BADGE_STYLES = {
   projectStatus: {
-    Tentative: "bg-muted text-muted-foreground",
-    Confirmed: "bg-primary/20 text-primary",
-    "Work Complete": "bg-amber-500/20 text-amber-400 border-amber-500/30",
-    Invoiced: "bg-emerald-500 text-white",
+    Tentative: "bg-gray-500/15 text-gray-400",
+    Confirmed: "bg-blue-500/15 text-blue-400",
+    "In Field": "bg-amber-500/15 text-amber-400",
+    "Ready to Bill": "bg-emerald-500/15 text-emerald-400",
+    Invoiced: "bg-purple-500/15 text-purple-400",
   },
   projectType: {
     Heifer: "bg-info/20 text-info",
@@ -74,10 +75,11 @@ export type BadgeCategory = keyof typeof BADGE_STYLES;
 // Standalone color maps consumed directly via lookup at call sites.
 // Mirrors entries in BADGE_STYLES; exported here for legacy import patterns.
 export const statusColor: Record<string, string> = {
-  Tentative: "bg-muted text-muted-foreground",
-  Confirmed: "bg-primary/20 text-primary",
-  "Work Complete": "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  Invoiced: "bg-emerald-500 text-white",
+  Tentative: "bg-gray-500/15 text-gray-400",
+  Confirmed: "bg-blue-500/15 text-blue-400",
+  "In Field": "bg-amber-500/15 text-amber-400",
+  "Ready to Bill": "bg-emerald-500/15 text-emerald-400",
+  Invoiced: "bg-purple-500/15 text-purple-400",
 };
 
 export const fulfillmentColors: Record<string, string> = {

@@ -99,18 +99,14 @@ export interface LaborLine {
 
 /* ── Constants ── */
 
-export const STATUS_COLORS: Record<string, string> = {
-  in_process: "bg-blue-500/20 text-blue-600",
-  work_complete: "bg-amber-500/20 text-amber-600",
-  invoiced_closed: "bg-emerald-500/20 text-emerald-600",
-};
-
-export const BILLING_STATUSES = ["in_process", "work_complete", "invoiced_closed"];
-
-export const STATUS_LABELS: Record<string, string> = {
-  in_process: "In Process",
-  work_complete: "Work Complete",
-  invoiced_closed: "Invoiced & Closed",
+// Project-status badge colors. The billing record's own `status` column is
+// deprecated — the project's status is the single source of truth.
+export const PROJECT_STATUS_COLORS: Record<string, string> = {
+  "Tentative": "bg-gray-500/15 text-gray-400",
+  "Confirmed": "bg-blue-500/15 text-blue-400",
+  "In Field": "bg-amber-500/15 text-amber-400",
+  "Ready to Bill": "bg-emerald-500/15 text-emerald-400",
+  "Invoiced": "bg-purple-500/15 text-purple-400",
 };
 
 /* ── Helpers ── */

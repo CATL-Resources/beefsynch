@@ -66,7 +66,7 @@ const formSchema = z.object({
   head_count: z.coerce.number().int().min(1, "Must be at least 1"),
   breeding_date: z.date({ required_error: "Breeding date is required" }),
   breeding_time: z.string().default("10:00"),
-  status: z.enum(["Tentative", "Confirmed", "Work Complete", "Invoiced"]).default("Tentative"),
+  status: z.enum(["Tentative", "Confirmed", "In Field", "Ready to Bill", "Invoiced"]).default("Tentative"),
   notes: z.string().max(2000).optional(),
 });
 
@@ -165,7 +165,7 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
         head_count: editData.head_count,
         breeding_date: editData.breeding_date ? new Date(editData.breeding_date + "T12:00:00") : undefined,
         breeding_time: editData.breeding_time?.slice(0, 5) || "10:00",
-        status: editData.status as "Tentative" | "Confirmed" | "Work Complete" | "Invoiced",
+        status: editData.status as "Tentative" | "Confirmed" | "In Field" | "Ready to Bill" | "Invoiced",
         notes: editData.notes || "",
       });
       setBulls(editData.bulls);
@@ -409,7 +409,7 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {["Tentative", "Confirmed", "Work Complete"].map((s) => (
+                      {["Tentative", "Confirmed", "In Field", "Ready to Bill"].map((s) => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
                       {field.value === "Invoiced" && (

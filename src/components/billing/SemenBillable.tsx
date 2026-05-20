@@ -4,10 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import SectionHeader from "./SectionHeader";
 
 interface SemenBillableProps {
   billingId: string;
   projectId: string;
+  isEditing: boolean;
+  onToggleEdit: () => void;
+  locked: boolean;
 }
 
 type SemenRow = {
@@ -53,7 +57,7 @@ function companyBadge(name: string | null | undefined) {
   return <Badge variant="outline" className="text-[10px]">{name}</Badge>;
 }
 
-export default function SemenBillable({ billingId, projectId }: SemenBillableProps) {
+export default function SemenBillable({ billingId, projectId, isEditing, onToggleEdit, locked }: SemenBillableProps) {
   const queryClient = useQueryClient();
 
   const { data: rows = [] } = useQuery({
@@ -275,8 +279,8 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
   }
 
   return (
-    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Semen: Billable Summary</h2>
+    <section className={`rounded-xl border bg-card/50 p-4 space-y-3 ${isEditing ? "border-primary/40 ring-1 ring-primary/30" : "border-border"}`}>
+      <SectionHeader title="Semen: Billable Summary" isEditing={isEditing} onToggleEdit={onToggleEdit} locked={locked} />
       <div className="rounded-lg border border-border/60 overflow-hidden">
         <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -309,6 +313,7 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                     return (
                       <Input
                         inputMode="numeric"
+                        disabled={!isEditing}
                         className="h-7 w-[64px] text-right text-[15px] font-medium text-emerald-500 ml-auto"
                         defaultValue={r.units_returned ?? ""}
                         placeholder={placeholder}
@@ -334,6 +339,7 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                 <td className="px-3 py-2 text-right">
                   <Input
                     inputMode="numeric"
+                    disabled={!isEditing}
                     className="h-7 w-[68px] text-right text-xs ml-auto text-emerald-600 font-semibold"
                     defaultValue={r.units_billable ?? ""}
                     placeholder="—"
@@ -347,6 +353,7 @@ export default function SemenBillable({ billingId, projectId }: SemenBillablePro
                 <td className="px-3 py-2 text-right">
                   <Input
                     inputMode="decimal"
+                    disabled={!isEditing}
                     className="h-7 w-[68px] text-right text-xs ml-auto"
                     defaultValue={r.unit_price ?? ""}
                     placeholder="—"

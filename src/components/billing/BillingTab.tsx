@@ -455,15 +455,15 @@ export default function BillingTab({
               <span className="text-2xl font-bold">{formatCurrency(grandTotal)}</span>
             </div>
 
-            {!readOnly && currentStatus !== "invoiced_closed" && (
+            {!readOnly && currentStatus !== "Invoiced" && (
               <Button className="w-full h-12 text-base font-semibold" onClick={onCloseOut}>
                 Close out project
               </Button>
             )}
-            {currentStatus === "invoiced_closed" && (
+            {currentStatus === "Invoiced" && (
               <div className="text-center py-2">
-                <span className="inline-flex items-center gap-2 text-emerald-600 font-semibold text-lg">
-                  ✓ Invoiced &amp; Closed
+                <span className="inline-flex items-center gap-2 text-purple-500 font-semibold text-lg">
+                  ✓ Invoiced
                 </span>
               </div>
             )}

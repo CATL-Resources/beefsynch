@@ -88,23 +88,28 @@ const Billable = () => {
     setOrders(mappedOrders);
 
     const { data: projRows } = await supabase
-      .from("project_billing")
+      .from("projects")
       .select(`
-        id, project_id, status,
-        projects!project_billing_project_id_fkey(id, name, breeding_date, customer_id, customers!projects_customer_id_fkey(name))
+        id, name, breeding_date, customer_id,
+        customers!projects_customer_id_fkey(name),
+        project_billing(id)
       `)
       .eq("organization_id", orgId)
-      .eq("status", "work_complete");
+      .eq("status", "Ready to Bill");
 
     const mappedProjects: BillableProject[] = (projRows ?? [])
-      .filter((b: any) => !!b.projects)
-      .map((b: any) => ({
-        id: b.projects.id,
-        name: b.projects.name,
-        customer_name: b.projects.customers?.name || "Unknown",
-        breeding_date: b.projects.breeding_date,
-        billing_id: b.id,
-      }));
+      .map((p: any) => {
+        const billing = Array.isArray(p.project_billing) ? p.project_billing[0] : p.project_billing;
+        if (!billing?.id) return null;
+        return {
+          id: p.id,
+          name: p.name,
+          customer_name: p.customers?.name || "Unknown",
+          breeding_date: p.breeding_date,
+          billing_id: billing.id,
+        } as BillableProject;
+      })
+      .filter((p): p is BillableProject => p !== null);
     setProjects(mappedProjects);
 
     setLoading(false);
@@ -142,15 +147,19 @@ const Billable = () => {
   const markProjectInvoiced = async (proj: BillableProject) => {
     setSavingId(proj.billing_id);
     const now = new Date().toISOString();
-    const { error: bErr } = await supabase
-      .from("project_billing")
-      .update({ status: "invoiced_closed", billing_completed_at: now })
-      .eq("id", proj.billing_id);
-    if (bErr) {
+    const { error: pErr } = await supabase
+      .from("projects")
+      .update({ status: "Invoiced" })
+      .eq("id", proj.id);
+    if (pErr) {
       setSavingId(null);
-      toast({ title: "Error", description: bErr.message, variant: "destructive" });
+      toast({ title: "Error", description: pErr.message, variant: "destructive" });
       return;
     }
+    await supabase
+      .from("project_billing")
+      .update({ billing_completed_at: now })
+      .eq("id", proj.billing_id);
     setSavingId(null);
     setProjects((prev) => prev.filter((p) => p.billing_id !== proj.billing_id));
     toast({ title: "Project marked invoiced" });

@@ -251,7 +251,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
 
       for (const r of (projRes.data ?? []) as any[]) {
         const status = r.projects?.status;
-        if (status === "Work Complete" || status === "Invoiced") continue;
+        if (status === "Ready to Bill" || status === "Invoiced") continue;
         const k = r.bull_catalog_id as string;
         const cur = projects[k] ?? { count: 0, headCount: 0, units: 0 };
         cur.count += 1;
@@ -310,7 +310,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       ]);
       const projects = (projRes.data ?? []).filter((r: any) => {
         const s = r.projects?.status;
-        return s !== "Work Complete" && s !== "Invoiced";
+        return s !== "Ready to Bill" && s !== "Invoiced";
       });
       const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
       const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered"]);

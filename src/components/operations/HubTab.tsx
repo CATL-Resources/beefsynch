@@ -108,7 +108,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         .from("projects")
         .select("id, name, breeding_date, head_count, status, cattle_type, protocol")
         .eq("organization_id", orgId)
-        .not("status", "in", '("Work Complete","Invoiced")')
+        .not("status", "in", '("Ready to Bill","Invoiced")')
         .gte("breeding_date", today)
         .lte("breeding_date", day14)
         .order("breeding_date");
@@ -323,14 +323,14 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         .from("projects")
         .select("id, name, status, breeding_date, project_billing(billing_completed_at, status, catl_invoice_number, select_sires_invoice_number)")
         .eq("organization_id", orgId)
-        .in("status", ["Work Complete", "Invoiced"]);
+        .in("status", ["Ready to Bill", "Invoiced"]);
 
       const unbilledProjects = (unbilled || []).filter((p: any) => {
         const billing = Array.isArray(p.project_billing) ? p.project_billing[0] : p.project_billing;
         // Already stamped as complete
         if (billing?.billing_completed_at) return false;
-        // Billing record says invoiced/closed
-        if (billing?.status === "invoiced_closed") return false;
+        // Project is fully invoiced
+        if (p.status === "Invoiced") return false;
         // Has invoice numbers — clearly already invoiced
         if (billing?.catl_invoice_number || billing?.select_sires_invoice_number) return false;
         return true;
@@ -341,7 +341,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         customerName: p.name,
         orderDate: p.breeding_date || "",
         bullSummary: "",
-        fulfillmentStatus: p.status === "Invoiced" ? "invoiced" : "work_complete",
+        fulfillmentStatus: p.status === "Invoiced" ? "invoiced" : "ready_to_bill",
         unitsOrdered: 0,
         unitsFilled: 0,
         unitsBillable: 0,
@@ -587,7 +587,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
           customers!projects_customer_id_fkey(name)
         `)
         .eq("organization_id", orgId)
-        .not("status", "in", '("Work Complete","Invoiced")')
+        .not("status", "in", '("Ready to Bill","Invoiced")')
         .gte("breeding_date", today)
         .lte("breeding_date", day7)
         .order("breeding_date");

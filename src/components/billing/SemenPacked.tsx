@@ -1,12 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import SectionHeader from "./SectionHeader";
 
 interface SemenPackedProps {
   projectId: string;
+  isEditing: boolean;
+  onToggleEdit: () => void;
+  locked: boolean;
 }
 
 type PackLineRow = {
@@ -29,7 +32,7 @@ function companyBadge(name: string | null | undefined) {
   return <Badge variant="outline" className="text-[10px]">{name}</Badge>;
 }
 
-export default function SemenPacked({ projectId }: SemenPackedProps) {
+export default function SemenPacked({ projectId, isEditing, onToggleEdit, locked }: SemenPackedProps) {
   const queryClient = useQueryClient();
 
   const { data: rows = [], isLoading } = useQuery({
@@ -87,8 +90,8 @@ export default function SemenPacked({ projectId }: SemenPackedProps) {
   };
 
   return (
-    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Semen: Packed</h2>
+    <section className={`rounded-xl border bg-card/50 p-4 space-y-3 ${isEditing ? "border-primary/40 ring-1 ring-primary/30" : "border-border"}`}>
+      <SectionHeader title="Semen: Packed" isEditing={isEditing} onToggleEdit={onToggleEdit} locked={locked} />
       <div className="rounded-lg border border-border/60 overflow-hidden">
         <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -112,18 +115,25 @@ export default function SemenPacked({ projectId }: SemenPackedProps) {
                 <td className="px-3 py-2 text-xs text-muted-foreground">{r.bull_code || "—"}</td>
                 <td className="px-3 py-2">{r.field_canister || "—"}</td>
                 <td className="px-3 py-2 text-right">
-                  <Input
-                    inputMode="numeric"
-                    className="h-7 w-[70px] text-right text-xs ml-auto"
-                    defaultValue={r.units}
-                    onBlur={(e) => saveUnits(r.id, r.units, e.target.value)}
-                  />
+                  {isEditing ? (
+                    <Input
+                      inputMode="numeric"
+                      className="h-7 w-[70px] text-right text-xs ml-auto"
+                      defaultValue={r.units}
+                      onBlur={(e) => saveUnits(r.id, r.units, e.target.value)}
+                    />
+                  ) : (
+                    <span className="tabular-nums">{r.units}</span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-center">
                   <button
                     type="button"
-                    onClick={() => toggleBillable(r.id, r.is_billable)}
-                    className={`inline-flex items-center justify-center rounded-full h-6 px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                    onClick={() => isEditing && toggleBillable(r.id, r.is_billable)}
+                    disabled={!isEditing}
+                    className={`inline-flex items-center justify-center rounded-full h-6 px-2.5 text-[11px] font-medium transition-colors ${
+                      isEditing ? "cursor-pointer" : "cursor-default"
+                    } ${
                       r.is_billable === false
                         ? "bg-red-500/15 text-red-400 hover:bg-red-500/25"
                         : "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"

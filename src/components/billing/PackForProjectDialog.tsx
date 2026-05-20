@@ -284,6 +284,14 @@ export default function PackForProjectDialog({
       const result = data as { ok?: boolean; pack_id?: string } | null;
       if (!result?.ok) throw new Error("Pack failed: invalid response from server");
 
+      // Packing advances the project to "In Field" but only from earlier
+      // stages so an already-billed project doesn't get rolled back.
+      await supabase
+        .from("projects")
+        .update({ status: "In Field" })
+        .eq("id", projectId)
+        .in("status", ["Tentative", "Confirmed"]);
+
       toast({ title: "Tank packed successfully" });
       onPackComplete();
       onOpenChange(false);

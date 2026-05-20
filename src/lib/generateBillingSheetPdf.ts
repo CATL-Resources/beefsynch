@@ -71,13 +71,8 @@ export function generateBillingSheetPdf(
     y += 5;
   }
 
-  // Status
-  const statusLabels: Record<string, string> = {
-    in_process: "In Process",
-    work_complete: "Work Complete",
-    invoiced_closed: "Invoiced & Closed",
-  };
-  doc.text(`Status: ${statusLabels[billing.status] || billing.status || "\u2014"}`, m, y);
+  // Status comes from the parent project row now; billing record status is deprecated.
+  doc.text(`Status: ${project?.status || "\u2014"}`, m, y);
   y += 4;
 
   // Thin rule

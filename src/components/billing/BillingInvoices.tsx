@@ -169,12 +169,12 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
           <Button variant="outline" size="sm" className="h-9" onClick={onPrintBillSummary}>
             <Printer className="h-4 w-4 mr-1.5" /> Print Bill
           </Button>
-          {currentStatus !== "invoiced_closed" ? (
+          {currentStatus !== "Invoiced" ? (
             <Button variant="destructive" size="sm" className="h-9" onClick={onCloseOut}>
               Close out
             </Button>
           ) : (
-            <span className="text-sm text-emerald-600 font-semibold">✓ Invoiced &amp; closed</span>
+            <span className="text-sm text-purple-500 font-semibold">✓ Invoiced</span>
           )}
         </div>
       </div>

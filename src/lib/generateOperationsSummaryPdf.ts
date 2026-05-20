@@ -34,7 +34,7 @@ export async function generateOperationsSummaryPdf(orgId: string) {
     .from("projects")
     .select("id, name, breeding_date, head_count, status, cattle_type, protocol, customer_id, customers!projects_customer_id_fkey(name)")
     .eq("organization_id", orgId)
-    .not("status", "in", '("Work Complete","Invoiced")')
+    .not("status", "in", '("Ready to Bill","Invoiced")')
     .order("breeding_date");
 
   if (!projects || projects.length === 0) return;

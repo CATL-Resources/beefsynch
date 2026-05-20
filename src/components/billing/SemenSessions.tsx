@@ -7,11 +7,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import SemenSessionCard, { InventoryRow } from "./SemenSessionCard";
 import UnpackFromProjectDialog from "./UnpackFromProjectDialog";
+import SectionHeader from "./SectionHeader";
 
 interface SemenSessionsProps {
   billingId: string;
   projectId: string;
   organizationId: string | null | undefined;
+  isEditing: boolean;
+  onToggleEdit: () => void;
+  locked: boolean;
 }
 
 type ProtocolEventRow = { event_name: string; event_date: string | null };
@@ -37,7 +41,7 @@ type SessionInvRow = {
   sort_order: number | null;
 };
 
-export default function SemenSessions({ billingId, projectId, organizationId }: SemenSessionsProps) {
+export default function SemenSessions({ billingId, projectId, organizationId, isEditing, onToggleEdit, locked }: SemenSessionsProps) {
   const queryClient = useQueryClient();
   const [unpackOpen, setUnpackOpen] = useState(false);
 
@@ -344,8 +348,8 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
   const totalBlown = visibleInventory.reduce((s, r) => s + (r.blown_units ?? 0), 0);
 
   return (
-    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Semen: Used by Session</h2>
+    <section className={`rounded-xl border bg-card/50 p-4 space-y-3 ${isEditing ? "border-primary/40 ring-1 ring-primary/30" : "border-border"}`}>
+      <SectionHeader title="Semen: Used by Session" isEditing={isEditing} onToggleEdit={onToggleEdit} locked={locked} />
       <div className="grid grid-cols-3 gap-2">
         {[
           { label: "Total head", value: totalHead, color: "text-foreground" },
@@ -377,6 +381,7 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
                 )}
                 onSessionField={saveSessionField}
                 onCellChange={saveCell}
+                isEditing={isEditing}
               />
               {i === visibleSessions.length - 1 && packInfo && organizationId && (
                 <Button
@@ -391,9 +396,11 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
           ))}
         </div>
       )}
-      <Button variant="outline" size="sm" className="h-8 text-xs" onClick={addSession}>
-        <Plus className="h-3.5 w-3.5 mr-1" /> Add session
-      </Button>
+      {isEditing && (
+        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={addSession}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Add session
+        </Button>
+      )}
       {packInfo && organizationId && (
         <UnpackFromProjectDialog
           open={unpackOpen}

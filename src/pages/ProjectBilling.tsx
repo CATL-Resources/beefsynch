@@ -37,8 +37,9 @@ import UnpackFromProjectDialog from "@/components/billing/UnpackFromProjectDialo
 
 import {
   BillingProduct, ProductLine, SessionLine, SessionInventoryLine, SemenLine, LaborLine,
-  STATUS_COLORS, BILLING_STATUSES, STATUS_LABELS, calcUnits, formatTime12,
+  PROJECT_STATUS_COLORS, calcUnits, formatTime12,
 } from "@/components/billing/billingTypes";
+import CloseOutReviewDialog from "@/components/billing/CloseOutReviewDialog";
 
 /* ────────────────── component ────────────────── */
 
@@ -323,7 +324,7 @@ const ProjectBilling = () => {
   async function createBlankWithSuggestions(proj: any, evts: any[], bulls: any[], products: BillingProduct[]) {
     const { data: billing, error } = await supabase
       .from("project_billing")
-      .insert({ project_id: proj.id, organization_id: orgId!, status: "in_process" })
+      .insert({ project_id: proj.id, organization_id: orgId! })
       .select().single();
 
     if (error || !billing) {
@@ -865,67 +866,44 @@ const ProjectBilling = () => {
     saveSemenLine(idx, { invoiced: nowInvoiced, invoiced_at: nowInvoiced ? new Date().toISOString() : null });
   }
 
-  async function markBillingInvoiced() {
-    if (!billingId) return;
+  async function markProjectInvoiced() {
+    if (!projectId || !billingId) return;
     const now = new Date().toISOString();
     const { error } = await supabase
-      .from("project_billing")
-      .update({ status: "invoiced_closed", billing_completed_at: now })
-      .eq("id", billingId);
+      .from("projects")
+      .update({ status: "Invoiced" })
+      .eq("id", projectId);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
       return;
     }
-    setBillingRecord((prev: any) => ({ ...prev, status: "invoiced_closed", billing_completed_at: now }));
+    await supabase
+      .from("project_billing")
+      .update({ billing_completed_at: now })
+      .eq("id", billingId);
     setProject((prev: any) => prev ? { ...prev, status: "Invoiced" } : prev);
-    toast({ title: "Marked invoiced & closed" });
+    setBillingRecord((prev: any) => ({ ...prev, billing_completed_at: now }));
+    toast({ title: "Marked invoiced" });
   }
 
-  async function revertBillingInvoiced() {
+  async function revertInvoiced() {
     if (!billingId || !projectId) return;
-    if (!window.confirm("Are you sure? This will move the project back to Work Complete and reopen the billing.")) return;
-    const { error: bErr } = await supabase
-      .from("project_billing")
-      .update({ status: "work_complete", billing_completed_at: null })
-      .eq("id", billingId);
-    if (bErr) {
-      toast({ title: "Error", description: bErr.message, variant: "destructive" });
-      return;
-    }
-    // The trigger guards against rolling project status back from Invoiced, so do it manually.
+    if (!window.confirm("Revert to Ready to Bill? This reopens the billing for edits.")) return;
     const { error: pErr } = await supabase
       .from("projects")
-      .update({ status: "Work Complete" })
+      .update({ status: "Ready to Bill" })
       .eq("id", projectId);
     if (pErr) {
       toast({ title: "Error", description: pErr.message, variant: "destructive" });
       return;
     }
-    setBillingRecord((prev: any) => ({ ...prev, status: "work_complete", billing_completed_at: null }));
-    setProject((prev: any) => prev ? { ...prev, status: "Work Complete" } : prev);
-    toast({ title: "Reverted to Work Complete" });
-  }
-
-  async function closeOutProject() {
-    if (!billingId) return;
-    const now = new Date().toISOString();
-    for (let i = 0; i < productLines.length; i++) {
-      if (!productLines[i].invoiced) toggleProductInvoiced(i);
-    }
-    for (let i = 0; i < semenLines.length; i++) {
-      if (!semenLines[i].invoiced) toggleSemenInvoiced(i);
-    }
-    for (const s of sessions) {
-      if (s.id && !s.invoiced) {
-        await supabase.from("project_billing_sessions").update({
-          invoiced: true, invoiced_at: now,
-        }).eq("id", s.id);
-      }
-    }
-    for (let i = 0; i < laborLines.length; i++) {
-      if (!laborLines[i].invoiced) saveLaborLine(i, { invoiced: true, invoiced_at: now });
-    }
-    saveBillingField("status", "invoiced_closed");
+    await supabase
+      .from("project_billing")
+      .update({ billing_completed_at: null })
+      .eq("id", billingId);
+    setProject((prev: any) => prev ? { ...prev, status: "Ready to Bill" } : prev);
+    setBillingRecord((prev: any) => ({ ...prev, billing_completed_at: null }));
+    toast({ title: "Reverted to Ready to Bill" });
   }
 
   /* ── Finalize inventory ── */
@@ -952,15 +930,15 @@ const ProjectBilling = () => {
     if (!projectId || !billingId) return;
     setCompleting(true);
     try {
-      const { error: projErr } = await supabase.from("projects").update({ status: "Work Complete" }).eq("id", projectId);
+      const { error: projErr } = await supabase.from("projects").update({ status: "Ready to Bill" }).eq("id", projectId);
       if (projErr) throw projErr;
       const userId = (await supabase.auth.getUser()).data.user?.id || null;
       const { error: billErr } = await supabase.from("project_billing")
         .update({ billing_completed_at: new Date().toISOString(), billing_completed_by: userId })
         .eq("id", billingId);
       if (billErr) throw billErr;
-      toast({ title: "Project completed" });
-      setProject((prev: any) => ({ ...prev, status: "Work Complete" }));
+      toast({ title: "Project marked Ready to Bill" });
+      setProject((prev: any) => ({ ...prev, status: "Ready to Bill" }));
       setBillingRecord((prev: any) => ({ ...prev, billing_completed_at: new Date().toISOString() }));
     } catch (err: any) {
       toast({ title: "Error", description: err?.message || "Could not complete project.", variant: "destructive" });
@@ -1047,11 +1025,26 @@ const ProjectBilling = () => {
 
   /* ════════════════════ COMPUTED VALUES ════════════════════ */
 
-  const currentStatus = billingRecord?.status || "in_process";
+  // Project status is the single source of truth — billing record status is deprecated.
+  const projectStatus: string = project?.status || "Tentative";
   const hasPack = projectPacks.length > 0;
   const packStatus = projectPacks[0]?.status || null;
   const isUnpacked = packStatus === "unpacked" || packStatus === "tank_returned";
-  const readOnly = project?.status === "Invoiced";
+  const isInvoiced = projectStatus === "Invoiced";
+  const readyToBill = projectStatus === "Ready to Bill";
+  const readOnly = isInvoiced;
+
+  /* ── Section locking ── */
+  const [editingSections, setEditingSections] = useState<Set<string>>(new Set());
+  const isEditing = (k: string) => !isInvoiced && editingSections.has(k);
+  const toggleSection = (k: string) =>
+    setEditingSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+
+  const [closeOutOpen, setCloseOutOpen] = useState(false);
 
   const totalLines = productLines.length + semenLines.length + sessions.length + laborLines.length;
   const allInvoiced = totalLines > 0 && [
@@ -1109,17 +1102,12 @@ const ProjectBilling = () => {
                       {project.protocol}
                     </Badge>
                   )}
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[currentStatus] || "bg-muted text-muted-foreground"}`}>
-                    {STATUS_LABELS[currentStatus] || currentStatus}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PROJECT_STATUS_COLORS[projectStatus] || "bg-muted text-muted-foreground"}`}>
+                    {projectStatus}
                   </span>
-                  {currentStatus === "work_complete" && (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={markBillingInvoiced}>
-                      Mark Invoiced
-                    </Button>
-                  )}
-                  {currentStatus === "invoiced_closed" && (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={revertBillingInvoiced}>
-                      Revert to Work Complete
+                  {isInvoiced && (
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={revertInvoiced}>
+                      Revert to Ready to Bill
                     </Button>
                   )}
                 </div>
@@ -1175,11 +1163,11 @@ const ProjectBilling = () => {
                   <Package className="h-4 w-4" /> Tank unpacked
                 </span>
               )}
-              {project?.status === "Work Complete" && currentStatus !== "invoiced_closed" && (
+              {readyToBill && (
                 <Button
                   size="sm"
                   className="h-9 bg-purple-600 hover:bg-purple-600/90 text-white"
-                  onClick={markBillingInvoiced}
+                  onClick={() => setCloseOutOpen(true)}
                 >
                   Mark Invoiced
                 </Button>
@@ -1206,9 +1194,11 @@ const ProjectBilling = () => {
                     </DropdownMenuItem>
                   )}
                   {hasPack && packStatus === "packed" && <DropdownMenuSeparator />}
-                  <DropdownMenuItem onClick={closeOutProject}>
-                    <CheckCircle className="h-4 w-4 mr-2" /> Close out
-                  </DropdownMenuItem>
+                  {readyToBill && (
+                    <DropdownMenuItem onClick={() => setCloseOutOpen(true)}>
+                      <CheckCircle className="h-4 w-4 mr-2" /> Close out
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={() => setEditProjectOpen(true)}>
                     <Settings className="h-4 w-4 mr-2" /> Edit project
                   </DropdownMenuItem>
@@ -1259,22 +1249,68 @@ const ProjectBilling = () => {
           </div>
         )}
 
+        {isInvoiced && (
+          <div className="rounded-lg border border-purple-500/40 bg-purple-500/10 px-4 py-3 text-sm text-purple-200">
+            This project has been invoiced. To make changes, revert to Ready to Bill.
+          </div>
+        )}
+
         {projectId && billingId && (
           <div className="space-y-4">
-            <ProtocolSchedule projectId={projectId} billingId={billingId} />
+            <ProtocolSchedule
+              projectId={projectId}
+              billingId={billingId}
+              isEditing={isEditing("protocol")}
+              onToggleEdit={() => toggleSection("protocol")}
+              locked={isInvoiced}
+            />
             <div className={hasPack ? "space-y-4" : "opacity-40 pointer-events-none space-y-4"}>
-              <SemenPacked projectId={projectId} />
-              <SemenSessions billingId={billingId} projectId={projectId} organizationId={orgId} />
-              <SemenBillable billingId={billingId} projectId={projectId} />
+              <SemenPacked
+                projectId={projectId}
+                isEditing={isEditing("packed")}
+                onToggleEdit={() => toggleSection("packed")}
+                locked={isInvoiced}
+              />
+              <SemenSessions
+                billingId={billingId}
+                projectId={projectId}
+                organizationId={orgId}
+                isEditing={isEditing("sessions")}
+                onToggleEdit={() => toggleSection("sessions")}
+                locked={isInvoiced}
+              />
+              <SemenBillable
+                billingId={billingId}
+                projectId={projectId}
+                isEditing={isEditing("semen_billable")}
+                onToggleEdit={() => toggleSection("semen_billable")}
+                locked={isInvoiced}
+              />
             </div>
-            <BillingProductsSection billingId={billingId} orgId={orgId} />
+            <BillingProductsSection
+              billingId={billingId}
+              orgId={orgId}
+              isEditing={isEditing("products")}
+              onToggleEdit={() => toggleSection("products")}
+              locked={isInvoiced}
+            />
             <BillingInvoices
               billingId={billingId}
               onPrintBillSummary={handlePrint}
-              onCloseOut={closeOutProject}
-              currentStatus={currentStatus}
+              onCloseOut={() => setCloseOutOpen(true)}
+              currentStatus={projectStatus}
             />
           </div>
+        )}
+
+        {billingId && (
+          <CloseOutReviewDialog
+            open={closeOutOpen}
+            onOpenChange={setCloseOutOpen}
+            projectName={project?.name ?? ""}
+            billingId={billingId}
+            onConfirm={markProjectInvoiced}
+          />
         )}
       </main>
 

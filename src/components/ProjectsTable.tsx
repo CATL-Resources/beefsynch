@@ -62,9 +62,9 @@ const ProjectsTable = ({ projects, selectedIds, onSelectionChange, bullsByProjec
       );
     }
     return [...list].sort((a, b) => {
-      // Complete projects always sort to the bottom
-      const aComplete = (a.status === "Work Complete" || a.status === "Invoiced") ? 1 : 0;
-      const bComplete = (b.status === "Work Complete" || b.status === "Invoiced") ? 1 : 0;
+      // Done projects always sort to the bottom
+      const aComplete = (a.status === "Ready to Bill" || a.status === "Invoiced") ? 1 : 0;
+      const bComplete = (b.status === "Ready to Bill" || b.status === "Invoiced") ? 1 : 0;
       if (aComplete !== bComplete) return aComplete - bComplete;
 
       // Within the same group, sort by active column
@@ -185,7 +185,7 @@ const ProjectsTable = ({ projects, selectedIds, onSelectionChange, bullsByProjec
             ))}
           </div>
           <div className="flex items-center gap-1 rounded-md border border-border bg-secondary p-0.5">
-            {["All", "Tentative", "Confirmed", "Work Complete", "Invoiced"].map((s) => (
+            {["All", "Tentative", "Confirmed", "In Field", "Ready to Bill", "Invoiced"].map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
