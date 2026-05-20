@@ -275,6 +275,8 @@ const TankDetail = () => {
   const [eTankName, setETankName] = useState("");
   const [eTankEid, setETankEid] = useState("");
   const [eTankType, setETankType] = useState("inventory_tank");
+  const [eCustomerId, setECustomerId] = useState<string | null>(null);
+  const [eCustomerOptions, setECustomerOptions] = useState<{ id: string; name: string }[]>([]);
   const [eNitrogenStatus, setENitrogenStatus] = useState("wet");
   const [eLocationStatus, setELocationStatus] = useState("here");
   const [eTankModel, setETankModel] = useState("");
@@ -306,6 +308,17 @@ const TankDetail = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load customers for the edit dialog when type becomes customer_tank.
+  useEffect(() => {
+    if (eTankType !== "customer_tank" || !orgId) return;
+    supabase
+      .from("customers")
+      .select("id, name")
+      .eq("organization_id", orgId)
+      .order("name")
+      .then(({ data }) => setECustomerOptions(data ?? []));
+  }, [eTankType, orgId]);
 
   // Movement dialog
   const [moveOpen, setMoveOpen] = useState(false);
@@ -520,6 +533,7 @@ const TankDetail = () => {
     setETankName(tank.tank_name || "");
     setETankEid(tank.eid || "");
     setETankType(tank.tank_type || "inventory_tank");
+    setECustomerId(tank.customer_id || null);
     setENitrogenStatus(tank.nitrogen_status || "wet");
     setELocationStatus(tank.location_status || "here");
     setETankModel(tank.model || "");
@@ -545,6 +559,14 @@ const TankDetail = () => {
 
   const handleEditSave = async () => {
     if (!eTankNumber.trim() || !id) return;
+    if (eTankType === "customer_tank" && !eCustomerId) {
+      toast({
+        title: "Customer required",
+        description: "Customer tanks must be assigned to a customer.",
+        variant: "destructive",
+      });
+      return;
+    }
     setESaving(true);
     const { error } = await supabase.from("tanks").update({
       tank_number: eTankNumber.trim(),
@@ -552,14 +574,14 @@ const TankDetail = () => {
       eid: eTankEid.trim() || null,
       tank_type: eTankType,
       nitrogen_status: eNitrogenStatus,
-      
+      customer_id: eTankType === "customer_tank" ? eCustomerId : null,
       model: eTankModel.trim() || null,
       serial_number: eTankSerial.trim() || null,
       description: eTankDesc.trim() || null,
     }).eq("id", id);
     setESaving(false);
     if (error) {
-      toast({ title: "Error", description: "Could not update tank.", variant: "destructive" });
+      toast({ title: "Error", description: error.message || "Could not update tank.", variant: "destructive" });
     } else {
       queryClient.invalidateQueries({ queryKey: ["tank_detail", id] });
       queryClient.invalidateQueries({ queryKey: ["all_tanks"] });
@@ -1210,6 +1232,19 @@ const TankDetail = () => {
                 <SelectContent>{TANK_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            {eTankType === "customer_tank" && (
+              <div className="space-y-1.5">
+                <Label>Customer *</Label>
+                <Select value={eCustomerId ?? ""} onValueChange={(v) => setECustomerId(v || null)}>
+                  <SelectTrigger><SelectValue placeholder="Select customer…" /></SelectTrigger>
+                  <SelectContent>
+                    {eCustomerOptions.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-4">
               <Label className="text-sm">Nitrogen</Label>
               <Select value={eNitrogenStatus} onValueChange={setENitrogenStatus}>
