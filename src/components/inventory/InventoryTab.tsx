@@ -77,11 +77,24 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
   // Default to "available" so the dashboard shows what's actually for sale by default.
   const [shelfMode, setShelfMode] = useState<"available" | "all">("available");
 
-  // When the toggle is "available", customer-only filters would show empty results.
-  // Reset to "company" if a customer-related filter is active.
+  // Keep shelfMode + ownerFilter in sync so the toggle actually changes what
+  // the user sees. The standalone ownerFilter dropdown was removed from the
+  // UI, so it's driven entirely by the shelfMode toggle + StatCard click-
+  // throughs.
   useEffect(() => {
-    if (shelfMode === "available" && !["all", "company", "CATL", "Select"].includes(ownerFilter)) {
-      setOwnerFilter("company");
+    if (shelfMode === "available") {
+      if (!["all", "company", "CATL", "Select"].includes(ownerFilter)) {
+        setOwnerFilter("company");
+      }
+      // "all" doesn't make sense in available mode — snap to company-only.
+      if (ownerFilter === "all") {
+        setOwnerFilter("company");
+      }
+    }
+    // Toggle says "All inventory" but ownerFilter was sitting on "company"
+    // (its default) — flip to "all" so customer-owned rows actually show up.
+    if (shelfMode === "all" && ownerFilter === "company") {
+      setOwnerFilter("all");
     }
   }, [shelfMode, ownerFilter]);
 
