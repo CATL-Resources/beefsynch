@@ -48,6 +48,7 @@ export interface EditOrderData {
   order_type: string;
   inventory_owner: string | null;
   needed_by: string | null;
+  customer_request_date?: string | null;
   bulls: BullRow[];
 }
 
@@ -71,6 +72,8 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
   const [orderDate, setOrderDate] = useState<Date | null>(null);
   const [neededBy, setNeededBy] = useState<Date | null>(null);
   const [neededByOpen, setNeededByOpen] = useState(false);
+  const [requestDate, setRequestDate] = useState<Date | null>(new Date());
+  const [requestDateOpen, setRequestDateOpen] = useState(false);
   const [billingStatus, setBillingStatus] = useState("unbilled");
   const [fulfillmentStatus, setFulfillmentStatus] = useState("pending");
   const [inventoryOwner, setInventoryOwner] = useState<"Select" | "CATL" | null>(null);
@@ -118,6 +121,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
       setOrderStatus(editData.order_status ?? (editData.order_date ? "received" : "not_ordered"));
       setOrderDate(editData.order_date ? new Date(editData.order_date + "T12:00:00") : null);
       setNeededBy((editData as any).needed_by ? new Date((editData as any).needed_by + "T12:00:00") : null);
+      setRequestDate(editData.customer_request_date ? new Date(editData.customer_request_date + "T12:00:00") : null);
       setBillingStatus(editData.billing_status);
       setFulfillmentStatus(editData.fulfillment_status ?? "pending");
       setInventoryOwner((editData.inventory_owner as "Select" | "CATL" | null) ?? null);
@@ -150,6 +154,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
       setOrderStatus("not_ordered");
       setOrderDate(null);
       setNeededBy(null);
+      setRequestDate(new Date());
       setBillingStatus("unbilled");
       setFulfillmentStatus("pending");
       setInventoryOwner(null);
@@ -225,6 +230,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
         order_status: orderStatus,
         order_date: orderStatus === "not_ordered" || !orderDate ? null : format(orderDate, "yyyy-MM-dd"),
         needed_by: neededBy ? format(neededBy, "yyyy-MM-dd") : null,
+        customer_request_date: requestDate ? format(requestDate, "yyyy-MM-dd") : null,
         fulfillment_status: isEditing ? fulfillmentStatus : "pending",
         billing_status: billingStatus,
         project_id: null,
@@ -480,6 +486,40 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
               </Popover>
             </div>
           )}
+
+          {/* Request Date (defaults to today) */}
+          <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
+            <Label className="text-right text-sm">Request Date</Label>
+            <div className="flex gap-2">
+              <Popover open={requestDateOpen} onOpenChange={setRequestDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("flex-1 justify-start text-left font-normal", !requestDate && "text-muted-foreground")}>
+                    {requestDate ? format(requestDate, "PPP") : "No date set"}
+                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={requestDate ?? undefined}
+                    onSelect={(d) => { setRequestDate(d ?? null); setRequestDateOpen(false); }}
+                    className="p-3 pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+              {requestDate && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setRequestDate(null)}
+                  className="text-xs text-muted-foreground"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
 
           {/* Needed By (optional) */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-x-4">
