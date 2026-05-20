@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -38,13 +38,17 @@ type CatalogProduct = {
   unit_label: string | null;
 };
 
-const DELIVERY_OPTIONS = [
-  { value: "not_yet", label: "Not Done" },
-  { value: "delivered", label: "Delivered" },
-  { value: "customer_pickup", label: "Customer Picked Up" },
-  { value: "customer_administered", label: "Customer Administered" },
-  { value: "catl_administered", label: "CATL Administered" },
+const DELIVERY_CYCLE = [
+  { value: "not_yet", label: "Not Done", className: "bg-gray-500/15 text-gray-400 hover:bg-gray-500/25" },
+  { value: "delivered", label: "Delivered", className: "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25" },
+  { value: "customer_pickup", label: "Customer Picked Up", className: "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25" },
+  { value: "customer_administered", label: "Customer Administered", className: "bg-amber-500/15 text-amber-400 hover:bg-amber-500/25" },
+  { value: "catl_administered", label: "CATL Administered", className: "bg-purple-500/15 text-purple-400 hover:bg-purple-500/25" },
 ];
+const nextDelivery = (current: string | null | undefined) => {
+  const i = DELIVERY_CYCLE.findIndex((d) => d.value === (current || "not_yet"));
+  return DELIVERY_CYCLE[(i + 1) % DELIVERY_CYCLE.length].value;
+};
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pending" },
@@ -216,14 +220,18 @@ export default function ProductOrderItemsSection({ orderId, orgId }: ProductOrde
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(i.line_total)}</td>
                 <td className="px-3 py-2">
-                  <Select value={i.delivery_method ?? "not_yet"} onValueChange={(v) => saveField(i, { delivery_method: v })}>
-                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {DELIVERY_OPTIONS.map((d) => (
-                        <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {(() => {
+                    const d = DELIVERY_CYCLE.find((x) => x.value === (i.delivery_method || "not_yet")) ?? DELIVERY_CYCLE[0];
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => saveField(i, { delivery_method: nextDelivery(i.delivery_method) })}
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors ${d.className}`}
+                      >
+                        {d.label}
+                      </button>
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-2">
                   <Select value={i.item_status ?? "pending"} onValueChange={(v) => saveField(i, { item_status: v })}>
@@ -239,10 +247,10 @@ export default function ProductOrderItemsSection({ orderId, orgId }: ProductOrde
                   <button
                     type="button"
                     onClick={() => removeItem(i.id)}
-                    className="text-muted-foreground hover:text-destructive"
+                    className="text-destructive hover:text-destructive/80 text-lg leading-none"
                     aria-label="Remove product"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    ×
                   </button>
                 </td>
               </tr>

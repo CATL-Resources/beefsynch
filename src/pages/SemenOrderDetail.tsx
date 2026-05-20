@@ -189,9 +189,9 @@ const SemenOrderDetail = () => {
         .in("transaction_type", ["direct_sale", "withdrawal"]);
       setDirectSaleTxns(directTxns || []);
 
-      // Fetch supply items for this order
+      // Fetch product/supply items for this order (new product_order_items table)
       const { data: supplyData } = await supabase
-        .from("order_supply_items")
+        .from("product_order_items")
         .select("*")
         .eq("semen_order_id", id)
         .order("created_at");
@@ -1217,54 +1217,9 @@ const SemenOrderDetail = () => {
         </Card>
         )}
 
-        {/* Products & supplies — new order_product_items table */}
+        {/* Products & supplies */}
         {id && (
           <ProductOrderItemsSection orderId={id} orgId={orgId} />
-        )}
-
-        {/* Supplies card */}
-        {supplyItems.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Supplies</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-lg border border-border/50 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/30">
-                      <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead className="text-right">Price</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {supplyItems.map((item: any) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-medium">{item.product_name}</TableCell>
-                        <TableCell className="text-right">{item.quantity}</TableCell>
-                        <TableCell className="text-muted-foreground">{item.unit_label || "—"}</TableCell>
-                        <TableCell className="text-right">${(Number(item.unit_price) || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          ${(Number(item.line_total) || 0).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    <TableRow className="bg-muted/20 font-bold">
-                      <TableCell colSpan={4} className="text-right">
-                        Supplies Total
-                      </TableCell>
-                      <TableCell className="text-right">
-                        ${supplyItems.reduce((s: number, i: any) => s + (Number(i.line_total) || 0), 0).toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
         )}
 
       </div>

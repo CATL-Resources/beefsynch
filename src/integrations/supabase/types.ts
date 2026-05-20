@@ -1175,6 +1175,66 @@ export type Database = {
           },
         ]
       }
+      product_order_items: {
+        Row: {
+          billing_product_id: string
+          created_at: string
+          delivery_method: string
+          id: string
+          item_status: string
+          line_total: number | null
+          notes: string | null
+          product_name: string
+          quantity: number
+          semen_order_id: string
+          unit_label: string | null
+          unit_price: number
+        }
+        Insert: {
+          billing_product_id: string
+          created_at?: string
+          delivery_method?: string
+          id?: string
+          item_status?: string
+          line_total?: number | null
+          notes?: string | null
+          product_name: string
+          quantity?: number
+          semen_order_id: string
+          unit_label?: string | null
+          unit_price?: number
+        }
+        Update: {
+          billing_product_id?: string
+          created_at?: string
+          delivery_method?: string
+          id?: string
+          item_status?: string
+          line_total?: number | null
+          notes?: string | null
+          product_name?: string
+          quantity?: number
+          semen_order_id?: string
+          unit_label?: string | null
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_order_items_billing_product_id_fkey"
+            columns: ["billing_product_id"]
+            isOneToOne: false
+            referencedRelation: "billing_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_order_items_semen_order_id_fkey"
+            columns: ["semen_order_id"]
+            isOneToOne: false
+            referencedRelation: "semen_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -1201,6 +1261,7 @@ export type Database = {
           billing_completed_at: string | null
           billing_completed_by: string | null
           catl_invoice_number: string | null
+          catl_invoice_status: string | null
           created_at: string | null
           detection_type: string | null
           id: string
@@ -1213,6 +1274,7 @@ export type Database = {
           qbo_invoice_id: string | null
           qbo_synced_at: string | null
           select_sires_invoice_number: string | null
+          select_sires_invoice_status: string | null
           status: string
           updated_at: string | null
           zoho_project_id: string | null
@@ -1221,6 +1283,7 @@ export type Database = {
           billing_completed_at?: string | null
           billing_completed_by?: string | null
           catl_invoice_number?: string | null
+          catl_invoice_status?: string | null
           created_at?: string | null
           detection_type?: string | null
           id?: string
@@ -1233,6 +1296,7 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_synced_at?: string | null
           select_sires_invoice_number?: string | null
+          select_sires_invoice_status?: string | null
           status?: string
           updated_at?: string | null
           zoho_project_id?: string | null
@@ -1241,6 +1305,7 @@ export type Database = {
           billing_completed_at?: string | null
           billing_completed_by?: string | null
           catl_invoice_number?: string | null
+          catl_invoice_status?: string | null
           created_at?: string | null
           detection_type?: string | null
           id?: string
@@ -1253,6 +1318,7 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_synced_at?: string | null
           select_sires_invoice_number?: string | null
+          select_sires_invoice_status?: string | null
           status?: string
           updated_at?: string | null
           zoho_project_id?: string | null
@@ -1422,6 +1488,7 @@ export type Database = {
           id: string
           invoiced: boolean
           invoiced_at: string | null
+          invoicing_company_id: string | null
           line_total: number | null
           sort_order: number | null
           unit_price: number | null
@@ -1439,6 +1506,7 @@ export type Database = {
           id?: string
           invoiced?: boolean
           invoiced_at?: string | null
+          invoicing_company_id?: string | null
           line_total?: number | null
           sort_order?: number | null
           unit_price?: number | null
@@ -1456,6 +1524,7 @@ export type Database = {
           id?: string
           invoiced?: boolean
           invoiced_at?: string | null
+          invoicing_company_id?: string | null
           line_total?: number | null
           sort_order?: number | null
           unit_price?: number | null
@@ -1485,6 +1554,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "view_bull_planning"
             referencedColumns: ["bull_catalog_id"]
+          },
+          {
+            foreignKeyName: "project_billing_semen_invoicing_company_id_fkey"
+            columns: ["invoicing_company_id"]
+            isOneToOne: false
+            referencedRelation: "semen_companies"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -2625,6 +2701,7 @@ export type Database = {
           created_at: string
           field_canister: string | null
           id: string
+          invoicing_company_id: string | null
           is_billable: boolean
           source_canister: string | null
           source_tank_id: string
@@ -2638,6 +2715,7 @@ export type Database = {
           created_at?: string
           field_canister?: string | null
           id?: string
+          invoicing_company_id?: string | null
           is_billable?: boolean
           source_canister?: string | null
           source_tank_id: string
@@ -2651,6 +2729,7 @@ export type Database = {
           created_at?: string
           field_canister?: string | null
           id?: string
+          invoicing_company_id?: string | null
           is_billable?: boolean
           source_canister?: string | null
           source_tank_id?: string
@@ -2671,6 +2750,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "view_bull_planning"
             referencedColumns: ["bull_catalog_id"]
+          },
+          {
+            foreignKeyName: "tank_pack_lines_invoicing_company_id_fkey"
+            columns: ["invoicing_company_id"]
+            isOneToOne: false
+            referencedRelation: "semen_companies"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "tank_pack_lines_source_tank_id_fkey"
@@ -3455,4 +3541,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

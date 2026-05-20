@@ -129,7 +129,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
       // Fetch existing supply lines for edit
       if (editData.id) {
         supabase
-          .from("order_supply_items")
+          .from("product_order_items")
           .select("*")
           .eq("semen_order_id", editData.id)
           .then(({ data }: { data: any }) => {
@@ -282,10 +282,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
         if (itemErr) throw itemErr;
       }
 
-      // Supplies — delete existing and re-insert
+      // Product/supply items — delete existing and re-insert.
+      // line_total is a generated column in product_order_items, so don't write it.
       if (isEditing) {
         const { error: delSupErr } = await supabase
-          .from("order_supply_items")
+          .from("product_order_items")
           .delete()
           .eq("semen_order_id", orderId);
         if (delSupErr) throw delSupErr;
@@ -301,10 +302,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
             quantity: qty,
             unit_price: s.unitPrice,
             unit_label: s.unitLabel || null,
-            line_total: qty * s.unitPrice,
+            delivery_method: "not_yet",
+            item_status: "pending",
           };
         });
-        const { error: supplyErr } = await supabase.from("order_supply_items").insert(supplyRows);
+        const { error: supplyErr } = await supabase.from("product_order_items").insert(supplyRows);
         if (supplyErr) throw supplyErr;
       }
 
@@ -622,10 +624,10 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
             />
           </div>
 
-          {/* Supplies */}
+          {/* Products & Supplies */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">Supplies</Label>
+              <Label className="text-sm font-medium">Products &amp; Supplies</Label>
               <Button
                 type="button"
                 variant="outline"
@@ -637,11 +639,11 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
                   ])
                 }
               >
-                + Add Supply
+                + Add Product
               </Button>
             </div>
             {supplyLines.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No supplies added.</p>
+              <p className="text-xs text-muted-foreground italic">No products added.</p>
             ) : (
               supplyLines.map((line, idx) => (
                 <div key={idx} className="flex items-center gap-2">
@@ -690,17 +692,18 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
                     </SelectContent>
                   </Select>
                   <Input
-                    type="number"
+                    inputMode="numeric"
                     className="w-[80px]"
                     placeholder="Qty"
-                    value={line.quantity}
-                    onChange={(e) =>
+                    value={line.quantity === "" ? "" : String(line.quantity)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9]/g, "");
                       setSupplyLines((prev) =>
                         prev.map((s, i) =>
-                          i === idx ? { ...s, quantity: e.target.value === "" ? "" : parseInt(e.target.value) || 0 } : s,
+                          i === idx ? { ...s, quantity: raw === "" ? "" : parseInt(raw) || 0 } : s,
                         ),
-                      )
-                    }
+                      );
+                    }}
                   />
                   <span className="text-xs text-muted-foreground w-[60px] text-right">
                     ${line.unitPrice.toFixed(2)}
