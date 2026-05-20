@@ -50,12 +50,28 @@ export async function printBreedingWorksheet(project: any) {
       .order("bull_name")
       .order("field_canister");
     if (plData) {
-      packLineRows = plData.map((pl: any) => ({
-        bull_name: pl.bull_name || "",
-        bull_code: pl.bull_code || null,
-        canister: pl.field_canister || "",
-        packed: pl.units ?? 0,
-      }));
+      // Aggregate by bull + field canister: when the same bull goes into the
+      // same canister from multiple source tanks (e.g. 60 from Bertha + 20
+      // from Aaron → can 4), the worksheet should show one row with the
+      // combined total (80), not two split rows.
+      const agg = new Map<string, { bull_name: string; bull_code: string | null; canister: string; packed: number }>();
+      for (const pl of plData) {
+        const bullName = pl.bull_name || "";
+        const bullCode = pl.bull_code || null;
+        const canister = pl.field_canister || "";
+        const key = `${bullName}|${bullCode ?? ""}|${canister}`;
+        const entry = agg.get(key);
+        if (entry) {
+          entry.packed += pl.units ?? 0;
+        } else {
+          agg.set(key, { bull_name: bullName, bull_code: bullCode, canister, packed: pl.units ?? 0 });
+        }
+      }
+      packLineRows = Array.from(agg.values()).sort((a, b) => {
+        const n = a.bull_name.localeCompare(b.bull_name);
+        if (n !== 0) return n;
+        return a.canister.localeCompare(b.canister, undefined, { numeric: true });
+      });
     }
 
     // Returned-summary data: only relevant when unpacked, but it's cheap to

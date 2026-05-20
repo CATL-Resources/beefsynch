@@ -46,6 +46,7 @@ type DestRow = {
   id: string;
   fieldCanister: string;
   units: string; // text so empty stays empty (no "0" default)
+  sourceInventoryId: string | null; // chosen source pull (null until first auto-pick)
 };
 
 type BullSection = {
@@ -102,14 +103,32 @@ const buildPulls = (inventory: InventoryRow[]): PullRow[] =>
     available: row.units,
   }));
 
-// Make one initial destination row covering the bull's planned need.
-const initialDestinations = (needed: number, startCan: number): DestRow[] => [
+// Make one initial destination row covering the bull's planned need. The
+// source is left null and gets auto-picked when the picker first opens.
+const initialDestinations = (needed: number, startCan: number, firstSourceId: string | null): DestRow[] => [
   {
     id: newDestId(),
     fieldCanister: startCan > 0 ? String(startCan) : "",
     units: needed > 0 ? String(needed) : "",
+    sourceInventoryId: firstSourceId,
   },
 ];
+
+// Compute remaining units per source inventory row given all destinations
+// (across all sections — sources are shared per bull, so this scopes by
+// bull section to keep it simple).
+function remainingByInventory(section: BullSection, excludeDestId?: string): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const p of section.pulls) map.set(p.inventoryId, p.available);
+  for (const d of section.destinations) {
+    if (d.id === excludeDestId) continue;
+    if (!d.sourceInventoryId) continue;
+    const u = Number(d.units) || 0;
+    if (u <= 0) continue;
+    map.set(d.sourceInventoryId, (map.get(d.sourceInventoryId) ?? 0) - u);
+  }
+  return map;
+}
 
 export default function PackForProjectDialog({
   open, onOpenChange, projectId, projectName, organizationId, onPackComplete,
@@ -243,7 +262,7 @@ export default function PackForProjectDialog({
           naabCode: info.naabCode,
           needed: info.needed,
           pulls,
-          destinations: previous?.destinations ?? initialDestinations(info.needed, idx),
+          destinations: previous?.destinations ?? initialDestinations(info.needed, idx, pulls[0]?.inventoryId ?? null),
           fromPlan: true,
           projects: info.projects,
         });
@@ -277,9 +296,23 @@ export default function PackForProjectDialog({
   const addDestination = (sectionKey: string) => {
     setBullSections((prev) => prev.map((s) => {
       if (s.key !== sectionKey) return s;
+      // Auto-suggest: pick the first source pull that still has remaining
+      // units after accounting for what's already assigned.
+      const remaining = remainingByInventory(s);
+      const suggested = s.pulls.find((p) => (remaining.get(p.inventoryId) ?? 0) > 0)
+        ?? s.pulls[0]
+        ?? null;
       return {
         ...s,
-        destinations: [...s.destinations, { id: newDestId(), fieldCanister: "", units: "" }],
+        destinations: [
+          ...s.destinations,
+          {
+            id: newDestId(),
+            fieldCanister: "",
+            units: "",
+            sourceInventoryId: suggested?.inventoryId ?? null,
+          },
+        ],
       };
     }));
   };
@@ -308,6 +341,7 @@ export default function PackForProjectDialog({
     // canisters. The pack_tank RPC writes one tank_pack_lines row per pull
     // and there's no unique constraint on (pack_id, bull_catalog_id).
     const inventory = await loadInventoryForBull(organizationId, catalogId);
+    const pulls = buildPulls(inventory);
     const { data: bullRow } = await supabase
       .from("bulls_catalog")
       .select("bull_name, naab_code")
@@ -321,8 +355,8 @@ export default function PackForProjectDialog({
         bullName: bullRow?.bull_name ?? _name,
         naabCode: bullRow?.naab_code ?? naabCode ?? null,
         needed: 0,
-        pulls: buildPulls(inventory),
-        destinations: initialDestinations(0, prev.length + 1),
+        pulls,
+        destinations: initialDestinations(0, prev.length + 1, pulls[0]?.inventoryId ?? null),
         fromPlan: false,
         projects: [],
       },
@@ -385,33 +419,27 @@ export default function PackForProjectDialog({
         units: number;
       }> = [];
 
-      // Per-bull FIFO allocation: walk the destination rows in order and
-      // draw from the available source pulls (highest-units first by load
-      // order). Splits across sources produce separate tank_pack_lines rows.
-      // Sources are shared across sections of the same bull (canister splits
-      // of one bull all draw from the same inventory pool).
+      // Per-bull source allocation. Each destination row carries its own
+      // user-chosen source (with FIFO suggestion). Track remaining per
+      // inventory row across the whole submission and overflow into the
+      // next available source for that bull when a chosen source runs dry.
       const sourceRemaining = new Map<string, number>(); // inventoryId → remaining
-      const sourceInfo = new Map<string, { sourceTankId: string; sourceCanister: string | null; label: string }>();
       for (const s of bullSections) {
         for (const p of s.pulls) {
-          if (!sourceRemaining.has(p.inventoryId)) {
-            sourceRemaining.set(p.inventoryId, p.available);
-            sourceInfo.set(p.inventoryId, {
-              sourceTankId: p.sourceTankId,
-              sourceCanister: p.sourceCanister,
-              label: p.sourceTankLabel + (p.sourceCanister ? ` · can ${p.sourceCanister}` : ""),
-            });
-          }
+          if (!sourceRemaining.has(p.inventoryId)) sourceRemaining.set(p.inventoryId, p.available);
         }
       }
 
       for (const s of bullSections) {
-        // Build the ordered source queue for THIS bull from its pulls (which
-        // are sorted by units desc at load time).
         for (const d of s.destinations) {
           let need = Number(d.units) || 0;
           if (need <= 0) continue;
-          for (const p of s.pulls) {
+          // Build a draw order that starts with the user's chosen source,
+          // then falls through to the rest in load order.
+          const chosen = s.pulls.find((p) => p.inventoryId === d.sourceInventoryId);
+          const others = s.pulls.filter((p) => p.inventoryId !== d.sourceInventoryId);
+          const order = chosen ? [chosen, ...others] : s.pulls;
+          for (const p of order) {
             if (need <= 0) break;
             const remaining = sourceRemaining.get(p.inventoryId) ?? 0;
             if (remaining <= 0) continue;
@@ -641,38 +669,76 @@ export default function PackForProjectDialog({
                     {s.pulls.length > 0 && (
                       <div className="space-y-1.5">
                         <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Pack into</div>
-                        {s.destinations.map((d) => (
-                          <div key={d.id} className="flex items-center gap-2 text-xs">
-                            <Label className="text-muted-foreground" htmlFor={`fc-${s.key}-${d.id}`}>Field can</Label>
-                            <Input
-                              id={`fc-${s.key}-${d.id}`}
-                              value={d.fieldCanister}
-                              placeholder="—"
-                              onChange={(e) => updateDestination(s.key, d.id, { fieldCanister: e.target.value })}
-                              className="h-8 w-16 text-xs"
-                            />
-                            <Label className="text-muted-foreground ml-1" htmlFor={`du-${s.key}-${d.id}`}>Units</Label>
-                            <Input
-                              id={`du-${s.key}-${d.id}`}
-                              type="text"
-                              inputMode="numeric"
-                              value={d.units}
-                              placeholder="—"
-                              onChange={(e) => updateDestination(s.key, d.id, { units: e.target.value.replace(/[^0-9]/g, "") })}
-                              className="h-8 w-20 text-right text-xs"
-                            />
-                            {s.destinations.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => removeDestination(s.key, d.id)}
-                                className="text-destructive hover:text-destructive/80 text-base leading-none px-1"
-                                aria-label="Remove canister"
+                        {s.destinations.map((d) => {
+                          // Remaining-per-source excluding THIS row's allocation, so
+                          // the dropdown shows what would be left if this row were
+                          // re-assigned.
+                          const remaining = remainingByInventory(s, d.id);
+                          const chosenRemaining = d.sourceInventoryId
+                            ? (remaining.get(d.sourceInventoryId) ?? 0) - (Number(d.units) || 0)
+                            : 0;
+                          const shortByPick = d.sourceInventoryId != null && (Number(d.units) || 0) > 0 && chosenRemaining < 0;
+                          return (
+                            <div key={d.id} className="flex flex-wrap items-center gap-2 text-xs">
+                              <Label className="text-muted-foreground" htmlFor={`fc-${s.key}-${d.id}`}>Field can</Label>
+                              <Input
+                                id={`fc-${s.key}-${d.id}`}
+                                value={d.fieldCanister}
+                                placeholder="—"
+                                onChange={(e) => updateDestination(s.key, d.id, { fieldCanister: e.target.value })}
+                                className="h-8 w-16 text-xs"
+                              />
+                              <Label className="text-muted-foreground ml-1" htmlFor={`du-${s.key}-${d.id}`}>Units</Label>
+                              <Input
+                                id={`du-${s.key}-${d.id}`}
+                                type="text"
+                                inputMode="numeric"
+                                value={d.units}
+                                placeholder="—"
+                                onChange={(e) => updateDestination(s.key, d.id, { units: e.target.value.replace(/[^0-9]/g, "") })}
+                                className="h-8 w-20 text-right text-xs"
+                              />
+                              <Label className="text-muted-foreground ml-1" htmlFor={`src-${s.key}-${d.id}`}>Source</Label>
+                              <select
+                                id={`src-${s.key}-${d.id}`}
+                                value={d.sourceInventoryId ?? ""}
+                                onChange={(e) =>
+                                  updateDestination(s.key, d.id, { sourceInventoryId: e.target.value || null })
+                                }
+                                className={`h-8 rounded-md border bg-background px-2 text-xs ${shortByPick ? "border-destructive text-destructive" : "border-input"}`}
                               >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                                {s.pulls.map((p) => {
+                                  const left = (remaining.get(p.inventoryId) ?? 0);
+                                  const label = `${p.sourceTankLabel}${p.sourceCanister ? ` · can ${p.sourceCanister}` : ""} — ${left} remaining`;
+                                  return (
+                                    <option
+                                      key={p.inventoryId}
+                                      value={p.inventoryId}
+                                      style={left <= 0 ? { color: "#888" } : undefined}
+                                    >
+                                      {label}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              {s.destinations.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeDestination(s.key, d.id)}
+                                  className="text-destructive hover:text-destructive/80 text-base leading-none px-1"
+                                  aria-label="Remove canister"
+                                >
+                                  ×
+                                </button>
+                              )}
+                              {shortByPick && (
+                                <span className="basis-full text-[11px] text-destructive">
+                                  Selected source only has {(remaining.get(d.sourceInventoryId!) ?? 0)} units — overflow will pull from the next available source.
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
                         <Button
                           type="button"
                           variant="ghost"
