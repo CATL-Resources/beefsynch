@@ -278,8 +278,8 @@ export default function SemenSessions({ billingId, projectId, organizationId }: 
   }, [sessions, lastPgfDate]);
 
   return (
-    <section className="space-y-3 pt-4 mt-4 border-t-2 border-border">
-      <h2 className="text-lg font-semibold">Semen: used by session</h2>
+    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Semen: Used by Session</h2>
       {visibleSessions.length === 0 ? (
         <p className="text-sm text-muted-foreground italic">
           No breeding sessions yet

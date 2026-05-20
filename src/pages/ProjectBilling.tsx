@@ -28,7 +28,6 @@ import ProtocolSchedule from "@/components/billing/ProtocolSchedule";
 import SemenPacked from "@/components/billing/SemenPacked";
 import SemenSessions from "@/components/billing/SemenSessions";
 import SemenBillable from "@/components/billing/SemenBillable";
-import BillingLabor from "@/components/billing/BillingLabor";
 import BillingInvoices from "@/components/billing/BillingInvoices";
 import InventoryDrawer from "@/components/shared/InventoryDrawer";
 import NewProjectDialog from "@/components/NewProjectDialog";
@@ -1233,15 +1232,14 @@ const ProjectBilling = () => {
         )}
 
         {projectId && billingId && (
-          <div className="space-y-2">
-            <ProtocolSchedule projectId={projectId} />
+          <div className="space-y-4">
+            <ProtocolSchedule projectId={projectId} billingId={billingId} />
             <BillingProductsSection billingId={billingId} orgId={orgId} />
-            <div className={hasPack ? "space-y-2" : "opacity-40 pointer-events-none space-y-2"}>
+            <div className={hasPack ? "space-y-4" : "opacity-40 pointer-events-none space-y-4"}>
               <SemenPacked projectId={projectId} />
               <SemenSessions billingId={billingId} projectId={projectId} organizationId={orgId} />
               <SemenBillable billingId={billingId} projectId={projectId} />
             </div>
-            <BillingLabor billingId={billingId} />
             <BillingInvoices
               billingId={billingId}
               onPrintWorksheet={handlePrintWorksheet}

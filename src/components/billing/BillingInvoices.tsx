@@ -94,8 +94,8 @@ export default function BillingInvoices({ billingId, onPrintWorksheet, onCloseOu
   };
 
   return (
-    <section className="space-y-4 pt-4 mt-4 border-t-2 border-border">
-      <h2 className="text-lg font-semibold">Invoicing</h2>
+    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Invoicing</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="rounded-lg border-l-4 border-blue-500 bg-muted/20 p-4 space-y-3">
           <div className="flex items-baseline justify-between">

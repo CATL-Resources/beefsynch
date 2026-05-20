@@ -41,10 +41,11 @@ type CatalogProduct = {
 };
 
 const DELIVERY_OPTIONS = [
-  { value: "not_yet", label: "Not yet" },
+  { value: "not_yet", label: "Not Done" },
   { value: "delivered", label: "Delivered" },
-  { value: "customer_administered", label: "Customer administered" },
-  { value: "customer_pickup", label: "Customer pickup" },
+  { value: "customer_pickup", label: "Customer Picked Up" },
+  { value: "customer_administered", label: "Customer Administered" },
+  { value: "catl_administered", label: "CATL Administered" },
 ];
 
 const formatCurrency = (n: number | null | undefined) =>
@@ -147,9 +148,9 @@ export default function BillingProducts({ billingId, orgId }: BillingProductsPro
   const sectionTotal = lines.reduce((s, l) => s + (l.line_total ?? 0), 0);
 
   return (
-    <section className="space-y-3 pt-4 mt-4 border-t-2 border-border">
+    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Products &amp; services</h2>
+        <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Products &amp; Services</h2>
         <span className="text-sm font-semibold tabular-nums">{formatCurrency(sectionTotal)}</span>
       </div>
       <div className="rounded-lg border border-border/60 overflow-hidden">

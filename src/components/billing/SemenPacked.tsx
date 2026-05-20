@@ -87,8 +87,8 @@ export default function SemenPacked({ projectId }: SemenPackedProps) {
   };
 
   return (
-    <section className="space-y-3 pt-4 mt-4 border-t-2 border-border">
-      <h2 className="text-lg font-semibold">Semen: packed</h2>
+    <section className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+      <h2 className="text-base font-bold tracking-tight uppercase text-muted-foreground">Semen: Packed</h2>
       <div className="rounded-lg border border-border/60 overflow-hidden">
         <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
