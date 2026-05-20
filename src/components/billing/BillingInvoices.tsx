@@ -167,7 +167,7 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-9" onClick={onPrintBillSummary}>
-            <Printer className="h-4 w-4 mr-1.5" /> Bill summary
+            <Printer className="h-4 w-4 mr-1.5" /> Print Bill
           </Button>
           {currentStatus !== "invoiced_closed" ? (
             <Button variant="destructive" size="sm" className="h-9" onClick={onCloseOut}>
