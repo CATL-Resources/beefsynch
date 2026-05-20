@@ -42,7 +42,7 @@ const TABLES_IN_ORDER: string[] = [
   "tank_movements",
   "semen_orders",
   "semen_order_items",
-  "order_supply_items",
+  "product_order_items",
   "shipments",
   "inventory_transactions",
   "tank_packs",
