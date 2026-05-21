@@ -9,6 +9,7 @@ import {
 import StatCard from "@/components/StatCard";
 import EmptyState from "@/components/EmptyState";
 import NewOrderDialog, { EditOrderData } from "@/components/NewOrderDialog";
+import PackOrderDialog from "@/components/orders/PackOrderDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +82,7 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   const [subTab, setSubTab] = useState<"customer" | "inventory" | "shipments">("customer");
   const [newOrderDefaultType, setNewOrderDefaultType] = useState<"customer" | "inventory">("customer");
   const [tier3Open, setTier3Open] = useState(false);
+  const [packingOrder, setPackingOrder] = useState<{ id: string; customerName: string | null } | null>(null);
 
   useEffect(() => {
     setSearch("");
@@ -397,6 +399,20 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                 Mark as Received
               </Button>
             )}
+            {order.order_type === "customer" &&
+              ["pending", "partially_fulfilled"].includes(order.fulfillment_status) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPackingOrder({ id: order.id, customerName: customerName });
+                  }}
+                >
+                  <Package className="h-3.5 w-3.5 mr-1" /> Pack
+                </Button>
+              )}
           </div>
         </div>
 
@@ -674,6 +690,20 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
             editData={editOrder}
             initialOrderType={newOrderDefaultType}
           />
+
+          {packingOrder && (
+            <PackOrderDialog
+              open={!!packingOrder}
+              onOpenChange={(open) => { if (!open) setPackingOrder(null); }}
+              orderId={packingOrder.id}
+              customerName={packingOrder.customerName}
+              organizationId={orgId}
+              onPackComplete={() => {
+                setPackingOrder(null);
+                queryClient.invalidateQueries({ queryKey: ["semen_orders", orgId] });
+              }}
+            />
+          )}
         </>
       )}
     </div>

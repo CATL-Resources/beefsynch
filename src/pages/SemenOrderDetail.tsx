@@ -35,6 +35,7 @@ import { MarkFulfilledModal } from "@/components/orders/MarkFulfilledModal";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import ReceiveDialog from "@/components/orders/ReceiveDialog";
 import ProductOrderItemsSection from "@/components/orders/ProductOrderItemsSection";
+import PackOrderDialog from "@/components/orders/PackOrderDialog";
 
 interface OrderRow {
   id: string;
@@ -201,6 +202,7 @@ const SemenOrderDetail = () => {
   const [closingOrder, setClosingOrder] = useState(false);
   const [cancellingItemId, setCancellingItemId] = useState<string | null>(null);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [packDialogOpen, setPackDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [packData, setPackData] = useState<any[]>([]);
   const [directSaleTxns, setDirectSaleTxns] = useState<any[]>([]);
@@ -877,6 +879,15 @@ const SemenOrderDetail = () => {
                     Fulfill Order
                   </Button>
                 )}
+                {canFulfillOrder(order.fulfillment_status) && (
+                  <Button
+                    size="sm"
+                    onClick={() => setPackDialogOpen(true)}
+                  >
+                    <Package className="h-4 w-4 mr-2" />
+                    Pack Order
+                  </Button>
+                )}
               </div>
             );
           })()}
@@ -1422,6 +1433,16 @@ const SemenOrderDetail = () => {
             bull_catalog_id: i.bull_catalog_id,
           }))}
           onReceived={() => load()}
+        />
+      )}
+      {order && orgId && (
+        <PackOrderDialog
+          open={packDialogOpen}
+          onOpenChange={setPackDialogOpen}
+          orderId={order.id}
+          customerName={customerName}
+          organizationId={orgId}
+          onPackComplete={() => load()}
         />
       )}
       <AppFooter />
