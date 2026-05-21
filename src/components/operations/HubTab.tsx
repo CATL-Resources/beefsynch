@@ -42,6 +42,7 @@ interface UpcomingProject {
 interface ActionCounts {
   pendingCustomerOrders: number;
   pendingCustomerUnits: number;
+  ordersToPlace: number;
   pendingInventoryOrders: number;
   tanksOut: number;
   tankNames: string[];
@@ -57,6 +58,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
   const [projects, setProjects] = useState<UpcomingProject[]>([]);
   const [actions, setActions] = useState<ActionCounts>({
     pendingCustomerOrders: 0, pendingCustomerUnits: 0,
+    ordersToPlace: 0,
     pendingInventoryOrders: 0, tanksOut: 0, tankNames: [],
     unbilledProjects: 0, unbilledNames: [],
     tanksDueForFill: 0, shippedNotReceived: 0,
@@ -256,16 +258,30 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       setProjects(projectsWithPacks);
 
       // 2. Action counts
+      //
+      // "Orders to fill" = customer orders that still have packing work to do.
+      // Limit strictly to pending / partially_fulfilled; anything past that
+      // (fulfilled, invoiced, cancelled, etc.) is not an action item.
       const { data: custOrders } = await supabase
         .from("semen_orders")
         .select("id, semen_order_items(units)")
         .eq("organization_id", orgId)
         .eq("order_type", "customer")
-        .not("fulfillment_status", "in", '("fulfilled","cancelled")');
+        .in("fulfillment_status", ["pending", "partially_fulfilled"]);
 
       const pendingCustCount = custOrders?.length || 0;
       const pendingCustUnits = (custOrders || []).reduce((s: number, o: any) =>
         s + (o.semen_order_items || []).reduce((s2: number, i: any) => s2 + (i.units || 0), 0), 0);
+
+      // "Orders to place" = anything not yet phoned in to the semen company,
+      // regardless of order_type. Already-fulfilled / invoiced / cancelled
+      // orders are excluded.
+      const { count: ordersToPlaceCount } = await supabase
+        .from("semen_orders")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", orgId)
+        .eq("order_status", "not_ordered")
+        .not("fulfillment_status", "in", '("fulfilled","invoiced","cancelled")');
 
       // Ready to invoice: customer orders, unbilled, fulfilled or partially_fulfilled
       const { data: invoiceableOrders } = await supabase
@@ -356,16 +372,19 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         .eq("order_type", "inventory")
         .not("fulfillment_status", "in", '("fulfilled","cancelled")');
 
+      // Tanks out = canonical state lives on `tanks.location_status`. Only
+      // company-owned tanks need to come back; customer-owned tanks that live
+      // at the customer's place permanently are not action items.
       const { data: tanksOutData } = await supabase
-        .from("tank_packs")
-        .select("id, field_tank_id, tanks!tank_packs_field_tank_id_fkey(tank_number, tank_name)")
+        .from("tanks")
+        .select("id, tank_number, tank_name")
         .eq("organization_id", orgId)
-        .not("status", "in", '("unpacked","tank_returned","cancelled")');
+        .eq("location_status", "out")
+        .eq("owner_type", "company");
 
-      const tankNames = (tanksOutData || []).map((t: any) => {
-        const tank = t.tanks;
-        return tank ? `${tank.tank_number}${tank.tank_name ? " " + tank.tank_name : ""}` : "Unknown";
-      });
+      const tankNames = (tanksOutData || []).map((t: any) =>
+        `${t.tank_number}${t.tank_name ? " " + t.tank_name : ""}`,
+      );
 
       // Tanks on site (location_status = 'here', not out with customer)
       const { data: fillData } = await supabase
@@ -478,6 +497,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
       setActions({
         pendingCustomerOrders: pendingCustCount,
         pendingCustomerUnits: pendingCustUnits,
+        ordersToPlace: ordersToPlaceCount ?? 0,
         pendingInventoryOrders: invOrders?.length || 0,
         tanksOut: tanksOutData?.length || 0,
         tankNames,
@@ -724,6 +744,28 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             </Card>
           )}
 
+          {actions.ordersToPlace > 0 && (
+            <Card
+              className="cursor-pointer border-amber-500/40 bg-amber-500/5 transition-colors hover:bg-amber-500/10"
+              onClick={() => onSwitchTab("orders")}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <Clock className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sm">
+                      {actions.ordersToPlace} order{actions.ordersToPlace !== 1 ? "s" : ""} to place
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Not yet called in to the semen company
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {actions.inventoryShortages.length > 0 && (
             actions.inventoryShortages.map((shortage) => (
               <Card
@@ -816,7 +858,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
             </CardContent>
           </Card>
 
-          {actions.pendingCustomerOrders === 0 && actions.tanksOut === 0 && actions.unbilledProjects === 0 && actions.pendingInventoryOrders === 0 && actions.inventoryShortages.length === 0 && (
+          {actions.pendingCustomerOrders === 0 && actions.ordersToPlace === 0 && actions.tanksOut === 0 && actions.unbilledProjects === 0 && actions.pendingInventoryOrders === 0 && actions.inventoryShortages.length === 0 && (
             <Card className="border-emerald-500/40 bg-emerald-500/5 sm:col-span-2">
               <CardContent className="p-4">
                 <div className="flex items-center gap-3">
