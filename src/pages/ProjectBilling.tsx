@@ -527,26 +527,11 @@ const ProjectBilling = () => {
     syncPackedFromPacks();
   }, [projectPacks, semenLines]);
 
-  /* ── Auto-fill Arm Service qty from breeding head total ── */
-  useEffect(() => {
-    if (project?.status === "Invoiced") return;
-    const breedingSessions = sessions.filter(s => {
-      const label = (s.session_label || "").toLowerCase();
-      return label.includes("breed") || label.includes("ai ") || label === "ai" || label.includes("tai");
-    });
-    const headTotal = breedingSessions.reduce((sum, s) => sum + (s.head_count || 0), 0);
-    if (headTotal === 0) return;
-
-    const armIdx = productLines.findIndex(p =>
-      (p.product_name || "").toLowerCase().includes("arm service")
-    );
-    if (armIdx === -1) return;
-
-    const current = productLines[armIdx];
-    if ((current.doses || 0) !== headTotal) {
-      saveProductLine(armIdx, { doses: headTotal });
-    }
-  }, [sessions, productLines, project?.status]);
+  // Arm Service doses + semen line aggregates are driven by
+  // `handleTotalUsedChanged` (sourced from session-inventory totals) — the
+  // previous head_count-based effect that lived here used `session.head_count`,
+  // which only reflected the *first* session inventory line a user edited and
+  // got stuck mid-session, leading to doses=103 when 393 was correct.
 
   async function syncPackedFromPacks() {
     const packIds = projectPacks.map((p) => p.id);
@@ -976,47 +961,65 @@ const ProjectBilling = () => {
     navigate("/operations");
   }
 
-  /* ── Auto-update AI Service qty + semen line used values from breeding ── */
-  const lastTotalUsedRef = useRef<number>(0);
+  // Push aggregated session-inventory totals into:
+  //   * Arm Service `doses` (sum of start_units - end_units across ALL
+  //     sessions and inventory lines — the actual straws handled), and
+  //   * per-bull `units_returned` / `units_blown` / `units_billable` on
+  //     `project_billing_semen`.
+  //
+  // Important: we do NOT early-return when `totalUsed` matches the previous
+  // call. A previous guard here did, which kept stale semen-line numbers
+  // (e.g. Quaker Hill billable stuck at packed=100) whenever the database
+  // drifted from the computed values. The inner `if (changed)` checks
+  // already prevent redundant writes.
   function handleTotalUsedChanged(totalUsed: number, bullUsed: Map<string, number>, bullBlown: Map<string, number>) {
-    if (totalUsed === lastTotalUsedRef.current) return;
-    lastTotalUsedRef.current = totalUsed;
-    // Update AI Service product line
+    // Arm Service auto-doses
     const serviceIdx = productLines.findIndex(p =>
       p.product_category === "service" || (p.product_name || "").toLowerCase().includes("service")
     );
     if (serviceIdx >= 0 && productLines[serviceIdx].doses !== totalUsed) {
-      // Always update doses (the session head count).
-      // Only update units_billed if the user hasn't manually overridden it —
-      // i.e., current units_billed still matches the old calculated value.
       const svc = productLines[serviceIdx];
-      const wasManual = svc.units_billed != null && svc.units_calculated != null
-        && Math.abs(svc.units_billed - svc.units_calculated) > 0.001;
-      const updates: Partial<ProductLine> = { doses: totalUsed };
+      // Treat units_billed as a manual override when it diverges from the
+      // previous auto-calculated doses. doses is the right anchor (the prior
+      // auto value) — units_calculated stays at 0 here and is unreliable.
+      const prevDoses = svc.doses ?? 0;
+      const wasManual = svc.units_billed != null
+        && Math.abs((svc.units_billed ?? 0) - prevDoses) > 0.001;
+      const updates: Partial<ProductLine> = { doses: totalUsed, units_calculated: totalUsed };
       if (!wasManual) {
         updates.units_billed = totalUsed;
       }
       saveProductLine(serviceIdx, updates);
     }
-    // Update semen lines with per-bull used + blown values for billing tab
+
+    // Per-bull semen-line aggregates. `units_returned` = packed minus used
+    // (equivalent to SUM(end_units) for a fully-filled session grid);
+    // `units_blown` = SUM(blown_units); `units_billable` = packed - returned
+    // - blown which simplifies to used - blown.
     let changed = false;
-    const updated = semenLines.map((sl, idx) => {
+    const updated = semenLines.map((sl) => {
       const key = sl.bull_catalog_id || sl.bull_name;
       const used = bullUsed.get(key) ?? 0;
       const blown = bullBlown.get(key) ?? 0;
+      const returned = Math.max(0, (sl.units_packed ?? 0) - used);
       const billable = Math.max(0, used - blown);
       const line_total = billable * (sl.unit_price ?? 0);
-      if (sl.units_billable !== billable || sl.units_blown !== blown) {
+      if (
+        sl.units_billable !== billable ||
+        sl.units_blown !== blown ||
+        sl.units_returned !== returned
+      ) {
         changed = true;
         if (sl.id) {
           debouncedSave(`semen-used-${sl.id}`, () =>
             supabase.from("project_billing_semen").update({
-              units_returned: (sl.units_packed ?? 0) - used,
+              units_returned: returned,
               units_blown: blown,
-              units_billable: billable, line_total,
+              units_billable: billable,
+              line_total,
             }).eq("id", sl.id));
         }
-        return { ...sl, units_returned: (sl.units_packed ?? 0) - used, units_blown: blown, units_billable: billable, line_total };
+        return { ...sl, units_returned: returned, units_blown: blown, units_billable: billable, line_total };
       }
       return sl;
     });
