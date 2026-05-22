@@ -247,7 +247,7 @@ const ReInventory = () => {
           sub_canister: nr.sub_canister.trim() || null,
           bull_catalog_id: nr.bull_catalog_id || null,
           custom_bull_name: nr.bull_catalog_id ? null : nr.bull_name.trim() || null,
-          bull_code: nr.bull_code.trim() || "Unknown",
+          bull_code: nr.bull_code.trim() || null,
           new_units: units,
           item_type: nr.item_type,
           customer_id: nrCustomerId,
