@@ -2080,6 +2080,7 @@ export type Database = {
           placed_by_user_id: string | null
           project_id: string | null
           semen_company_id: string | null
+          status: string
           supplier_invoice_number: string | null
         }
         Insert: {
@@ -2116,6 +2117,7 @@ export type Database = {
           placed_by_user_id?: string | null
           project_id?: string | null
           semen_company_id?: string | null
+          status: string
           supplier_invoice_number?: string | null
         }
         Update: {
@@ -2152,6 +2154,7 @@ export type Database = {
           placed_by_user_id?: string | null
           project_id?: string | null
           semen_company_id?: string | null
+          status?: string
           supplier_invoice_number?: string | null
         }
         Relationships: [

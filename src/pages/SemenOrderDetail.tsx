@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, FileDown, Pencil, Trash2, Loader2, Package, Printer, MoreVertical, XCircle, Check, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, FileDown, Pencil, Trash2, Loader2, Package, Printer, MoreVertical, XCircle, CheckCircle2 } from "lucide-react";
 import { OrderPrintSheet } from "@/components/orders/OrderPrintSheet";
 import { useOrgRole } from "@/hooks/useOrgRole";
 import { FulfillOrderDialog } from "@/components/orders/FulfillOrderDialog";
@@ -30,7 +30,6 @@ import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
 import ClickableRegNumber from "@/components/ClickableRegNumber";
-import { getOrderDisplayStatus, canFulfillOrder } from "@/lib/badgeStyles";
 import { MarkFulfilledModal } from "@/components/orders/MarkFulfilledModal";
 import QuickBullEditDialog from "@/components/bulls/QuickBullEditDialog";
 import ReceiveDialog from "@/components/orders/ReceiveDialog";
@@ -433,23 +432,7 @@ const SemenOrderDetail = () => {
     load();
   };
 
-  const advanceOrderStatus = async (next: "ordered" | "received") => {
-    if (!order) return;
-    const { error } = await supabase
-      .from("semen_orders")
-      .update({ order_status: next })
-      .eq("id", order.id);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-      return;
-    }
-    toast({
-      title: next === "ordered"
-        ? `Marked as ordered — ${format(new Date(), "MMM d")}`
-        : `Marked as received — ${format(new Date(), "MMM d")}`,
-    });
-    load();
-  };
+
 
   const saveOrderDate = async (
     field: "customer_request_date" | "needed_by" | "order_date" | "expected_ship_date" | "expected_arrival_date",
@@ -672,17 +655,7 @@ const SemenOrderDetail = () => {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
-                {order.order_status === "not_ordered" && (
-                  <DropdownMenuItem onClick={() => advanceOrderStatus("ordered")}>
-                    <Check className="h-4 w-4 mr-2" /> Mark as Ordered
-                  </DropdownMenuItem>
-                )}
-                {order.order_status === "ordered" && (
-                  <DropdownMenuItem onClick={() => advanceOrderStatus("received")}>
-                    <Check className="h-4 w-4 mr-2" /> Mark as Received
-                  </DropdownMenuItem>
-                )}
-                {!["fulfilled", "invoiced", "cancelled"].includes(order.fulfillment_status) && (
+                {((order as any).status ?? "open") === "open" && (
                   <DropdownMenuItem onClick={() => setMarkFulfilledOpen(true)}>
                     <CheckCircle2 className="h-4 w-4 mr-2" /> Mark Fulfilled
                   </DropdownMenuItem>
@@ -693,7 +666,7 @@ const SemenOrderDetail = () => {
                 <DropdownMenuItem onClick={() => window.print()}>
                   <Printer className="h-4 w-4 mr-2" /> Print Bill
                 </DropdownMenuItem>
-                {isInventory && hasOpenItems && !["fulfilled", "cancelled"].includes(order.fulfillment_status) && (
+                {isInventory && hasOpenItems && ((order as any).status ?? "open") === "open" && (
                   <DropdownMenuItem
                     onClick={() => setCloseConfirmOpen(true)}
                     disabled={closingOrder}
@@ -701,7 +674,7 @@ const SemenOrderDetail = () => {
                     <XCircle className="h-4 w-4 mr-2" /> Close Order
                   </DropdownMenuItem>
                 )}
-                {!["fulfilled", "cancelled"].includes(order.fulfillment_status) && (
+                {((order as any).status ?? "open") === "open" && (
                   <>
                     <DropdownMenuItem onClick={openEdit}>
                       <Pencil className="h-4 w-4 mr-2" /> Edit Order
@@ -783,14 +756,21 @@ const SemenOrderDetail = () => {
           </p>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             {(() => {
-              const status = getOrderDisplayStatus(order);
+              const s = (order as any).status ?? "open";
+              const map: Record<string, { label: string; className: string }> = {
+                open:      { label: "Open",      className: "bg-destructive/20 text-destructive border-destructive/30" },
+                fulfilled: { label: "Fulfilled", className: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" },
+                invoiced:  { label: "Invoiced",  className: "bg-purple-500/20 text-purple-300 border-purple-500/40" },
+                cancelled: { label: "Cancelled", className: "bg-muted text-muted-foreground border-border" },
+              };
+              const pill = map[s] ?? map.open;
               return (
-                <Badge variant="outline" className={cn("text-xs", status.className)}>
-                  {status.label}
+                <Badge variant="outline" className={cn("text-xs", pill.className)}>
+                  {pill.label}
                 </Badge>
               );
             })()}
-            {order.order_type === "customer" && canFulfillOrder(order.fulfillment_status) && (
+            {order.order_type === "customer" && ((order as any).status ?? "open") === "open" && (
               <Button
                 size="sm"
                 onClick={() => setPackDialogOpen(true)}

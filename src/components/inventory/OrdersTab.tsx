@@ -19,13 +19,21 @@ import { useOrgRole } from "@/hooks/useOrgRole";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { getOrderDisplayStatus } from "@/lib/badgeStyles";
+// Unified status pill — Open (red, needs work), Fulfilled (green, billable),
+// Invoiced (purple, done), Cancelled (gray).
+const unifiedStatusBadge = (status: string): { label: string; className: string } => {
+  switch (status) {
+    case "fulfilled": return { label: "Fulfilled", className: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" };
+    case "invoiced":  return { label: "Invoiced",  className: "bg-purple-500/20 text-purple-300 border-purple-500/40" };
+    case "cancelled": return { label: "Cancelled", className: "bg-muted text-muted-foreground border-border" };
+    default:          return { label: "Open",      className: "bg-destructive/20 text-destructive border-destructive/30" };
+  }
+};
 import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import ReceivingTab from "@/components/inventory/ReceivingTab";
 
-type ChipFilter = "all" | "open" | "needs_invoice" | "invoiced" | "done";
-type OrderStatusFilter = "all" | "not_ordered" | "ordered" | "received";
-type Tier = "open" | "needs_invoice" | "invoiced" | "done";
+type ChipFilter = "all" | "open" | "fulfilled" | "invoiced";
+type Tier = "open" | "fulfilled" | "invoiced";
 
 const formatCompactDate = (iso: string | null | undefined) => {
   if (!iso) return null;
@@ -41,29 +49,10 @@ const isNeededBySoon = (iso: string | null | undefined) => {
 };
 
 const classify = (o: any): Tier | "cancelled" | null => {
-  const f = o.fulfillment_status;
-  const b = o.billing_status;
-  const isInventory = o.order_type === "inventory";
-  // fulfillment_status === 'invoiced' is set automatically by a DB trigger
-  // when invoice_number is populated. billing_status checks are kept for
-  // backwards compat with rows that pre-date the trigger.
-  const isInvoiced = f === "invoiced" || b === "invoiced" || b === "paid";
-  const isFulfilled = f === "fulfilled" || f === "ready_to_close" || isInvoiced;
-
-  if (f === "cancelled") return "cancelled";
-
-  // Inventory orders (POs to suppliers) have no customer to bill. Fulfilled =
-  // done, full stop — they never enter the needs_invoice tier.
-  if (isInventory) return isFulfilled ? "done" : "open";
-
-  // Paid = done. Invoiced (but not yet paid) is its own tier.
-  if (b === "paid") return "done";
-  if (isInvoiced) return "invoiced";
-
-  // Needs invoice = fulfilled but NOT invoiced
-  if (isFulfilled) return "needs_invoice";
-
-  // Everything else is open (pending, partially_fulfilled, ordered, shipped, etc)
+  const s = o.status ?? "open";
+  if (s === "cancelled") return "cancelled";
+  if (s === "invoiced") return "invoiced";
+  if (s === "fulfilled") return "fulfilled";
   return "open";
 };
 
@@ -76,7 +65,6 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   const [editOrder, setEditOrder] = useState<EditOrderData | null>(null);
   const [search, setSearch] = useState("");
   const [chipFilter, setChipFilter] = useState<ChipFilter>("all");
-  const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [subTab, setSubTab] = useState<"customer" | "inventory" | "shipments">("customer");
@@ -92,27 +80,10 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
     setDateTo(undefined);
   }, [subTab]);
 
-  const advanceOrderStatus = async (
-    e: React.MouseEvent,
-    orderId: string,
-    next: "ordered" | "received",
-  ) => {
-    e.stopPropagation();
-    const { error } = await supabase
-      .from("semen_orders")
-      .update({ order_status: next })
-      .eq("id", orderId);
-    if (error) {
-      toast({ title: "Couldn't update", description: error.message, variant: "destructive" });
-      return;
-    }
-    if (next === "ordered") {
-      toast({ title: `Marked as ordered — ${format(new Date(), "MMM d")}` });
-    } else {
-      toast({ title: `Marked as received — ${format(new Date(), "MMM d")}` });
-    }
-    queryClient.invalidateQueries({ queryKey: ["semen_orders", orgId] });
-  };
+  // The "Mark as Ordered" / "Mark as Received" actions were removed when
+  // order_status/fulfillment_status were collapsed into a single lifecycle.
+  // Whether semen is in stock is now a question the inventory indicator
+  // answers, not a status the user maintains.
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["semen_orders", orgId],
@@ -230,13 +201,9 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
 
   const scopedOrders = subTab === "customer" ? customerOrders : inventoryOrders;
 
-  // Apply search + date + order_status filters (chip filter handled separately for tier rendering)
+  // Apply search + date filters (chip filter handled separately for tier rendering)
   const baseFiltered = useMemo(() => {
     const filtered = scopedOrders.filter((o: any) => {
-      if (orderStatusFilter !== "all") {
-        const status = o.order_status || "not_ordered";
-        if (status !== orderStatusFilter) return false;
-      }
       if (search) {
         const q = search.toLowerCase();
         const customerMatch = (o.customers?.name || "").toLowerCase().includes(q);
@@ -255,13 +222,13 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
       return true;
     });
 
-    // Default sort: not_ordered first, then by needed_by asc, then by
-    // customer_request_date asc. Falls back to created_at.
-    const orderStatusRank = (s: string | null | undefined) =>
-      s === "not_ordered" || !s ? 0 : s === "ordered" ? 1 : 2;
+    // Default sort: open first (needs action), then fulfilled, then invoiced,
+    // with needed_by ascending breaking ties (soonest first).
+    const statusRank = (s: string | null | undefined) =>
+      s === "open" || !s ? 0 : s === "fulfilled" ? 1 : s === "invoiced" ? 2 : 3;
     return [...filtered].sort((a: any, b: any) => {
-      const sa = orderStatusRank(a.order_status);
-      const sb = orderStatusRank(b.order_status);
+      const sa = statusRank(a.status);
+      const sb = statusRank(b.status);
       if (sa !== sb) return sa - sb;
       const an = a.needed_by ? parseISO(a.needed_by).getTime() : Number.POSITIVE_INFINITY;
       const bn = b.needed_by ? parseISO(b.needed_by).getTime() : Number.POSITIVE_INFINITY;
@@ -274,21 +241,20 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
         : b.created_at ? new Date(b.created_at).getTime() : Number.POSITIVE_INFINITY;
       return ar - br;
     });
-  }, [scopedOrders, search, dateFrom, dateTo, orderStatusFilter]);
+  }, [scopedOrders, search, dateFrom, dateTo]);
 
-  // Group into tiers (most-recent first within tier — query already orders by order_date DESC)
+  // Group by unified status. Cancelled orders go to their own bucket.
   const grouped = useMemo(() => {
-    const tier1: any[] = []; // open orders
-    const tier2: any[] = []; // needs invoice
-    const invoiced: any[] = []; // invoice number entered, not yet paid
-    const tier3: any[] = []; // done (paid / inventory fulfilled)
+    const tier1: any[] = []; // open
+    const tier2: any[] = []; // fulfilled (needs invoice)
+    const invoiced: any[] = []; // invoiced
+    const tier3: any[] = []; // (kept for backwards-compat layout; unused now)
     const cancelled: any[] = [];
     for (const o of baseFiltered) {
       const t = classify(o);
       if (t === "open") tier1.push(o);
-      else if (t === "needs_invoice") tier2.push(o);
+      else if (t === "fulfilled") tier2.push(o);
       else if (t === "invoiced") invoiced.push(o);
-      else if (t === "done") tier3.push(o);
       else if (t === "cancelled") cancelled.push(o);
     }
     if (subTab === "inventory") {
@@ -306,7 +272,7 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   const totalOrders = scopedOrders.length;
   const totalUnits = useMemo(() => scopedOrders.reduce((sum: number, o: any) =>
     sum + (o.semen_order_items?.reduce((s: number, i: any) => s + (i.units || 0), 0) ?? 0), 0), [scopedOrders]);
-  const pendingCount = scopedOrders.filter((o: any) => o.fulfillment_status !== "fulfilled").length;
+  const pendingCount = scopedOrders.filter((o: any) => (o.status ?? "open") === "open").length;
   // Inventory orders are CATL's POs to suppliers — no customer to bill, so
   // they shouldn't count toward the unbilled tally.
   const unbilledCount = scopedOrders.filter((o: any) => o.billing_status === "unbilled" && o.order_type !== "inventory").length;
@@ -335,9 +301,9 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
         : "—");
     const totalUnitsRow = getOrderUnits(order.semen_order_items);
     const items = order.semen_order_items || [];
-    const isUnfulfilled = !["fulfilled", "invoiced", "cancelled"].includes(order.fulfillment_status);
-    const orderStatus = order.order_status || "not_ordered";
-    const displayStatus = getOrderDisplayStatus(order);
+    const status = order.status ?? "open";
+    const isUnfulfilled = status === "open";
+    const displayStatus = unifiedStatusBadge(status);
     const neededByLabel = formatCompactDate(order.needed_by);
     const neededBySoon = isNeededBySoon(order.needed_by);
     const requestedLabel = formatCompactDate(order.customer_request_date) ?? formatCompactDate(order.created_at);
@@ -380,39 +346,19 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
               <div className="text-lg font-bold tabular-nums leading-none">{totalUnitsRow}</div>
               <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">units</div>
             </div>
-            {orderStatus === "not_ordered" && (
-              <Button
-                size="sm"
-                className="h-7 text-xs bg-amber-500 hover:bg-amber-500/90 text-white"
-                onClick={(e) => advanceOrderStatus(e, order.id, "ordered")}
-              >
-                Mark as Ordered
-              </Button>
-            )}
-            {orderStatus === "ordered" && (
+            {order.order_type === "customer" && status === "open" && (
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 text-xs border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-                onClick={(e) => advanceOrderStatus(e, order.id, "received")}
+                className="h-7 text-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPackingOrder({ id: order.id, customerName: customerName });
+                }}
               >
-                Mark as Received
+                <Package className="h-3.5 w-3.5 mr-1" /> Pack
               </Button>
             )}
-            {order.order_type === "customer" &&
-              ["pending", "partially_fulfilled"].includes(order.fulfillment_status) && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPackingOrder({ id: order.id, customerName: customerName });
-                  }}
-                >
-                  <Package className="h-3.5 w-3.5 mr-1" /> Pack
-                </Button>
-              )}
           </div>
         </div>
 
@@ -489,9 +435,8 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   // Build the list of orders per chip filter
   const flatList = useMemo(() => {
     if (chipFilter === "open") return grouped.tier1;
-    if (chipFilter === "needs_invoice") return grouped.tier2;
+    if (chipFilter === "fulfilled") return grouped.tier2;
     if (chipFilter === "invoiced") return grouped.invoiced;
-    if (chipFilter === "done") return [...grouped.tier3, ...grouped.cancelled];
     return [];
   }, [chipFilter, grouped]);
 
@@ -572,14 +517,13 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
             <StatCard title="Unbilled" value={unbilledCount} delay={300} index={3} icon={DollarSign} />
           </div>
 
-          {/* Filter chips (replaces fulfillment + billing dropdowns) */}
+          {/* Single status filter row — the three lifecycle stages plus All */}
           <div className="flex flex-wrap gap-2 items-center">
             {([
               { key: "all", label: "All" },
               { key: "open", label: "Open" },
-              { key: "needs_invoice", label: "Needs Invoice" },
+              { key: "fulfilled", label: "Fulfilled" },
               { key: "invoiced", label: "Invoiced" },
-              { key: "done", label: "Completed" },
             ] as { key: ChipFilter; label: string }[]).map(chip => (
               <button
                 key={chip.key}
@@ -589,35 +533,6 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
                   chipFilter === chip.key
                     ? "bg-primary text-primary-foreground"
                     : "bg-card/60 text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/40"
-                )}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Order-status filter */}
-          <div className="flex flex-wrap gap-2 items-center">
-            {([
-              { key: "all", label: "All Statuses" },
-              { key: "not_ordered", label: "Not Ordered" },
-              { key: "ordered", label: "Ordered" },
-              { key: "received", label: "Received" },
-            ] as { key: OrderStatusFilter; label: string }[]).map(chip => (
-              <button
-                key={chip.key}
-                onClick={() => setOrderStatusFilter(chip.key)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-medium transition-colors border",
-                  orderStatusFilter === chip.key
-                    ? chip.key === "not_ordered"
-                      ? "bg-destructive/20 text-destructive border-destructive/40"
-                      : chip.key === "ordered"
-                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                        : chip.key === "received"
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                          : "bg-primary text-primary-foreground border-primary"
-                    : "bg-card/60 text-muted-foreground hover:text-foreground hover:bg-secondary/60 border-border/40"
                 )}
               >
                 {chip.label}
@@ -671,10 +586,12 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
             </div>
           ) : showTiers ? (
             <div className="space-y-4">
-              <TierSection title="Open Orders" rows={grouped.tier1} defaultOpen collapsible={false} />
-              <TierSection title="Needs Invoice" rows={grouped.tier2} defaultOpen collapsible={false} />
-              <TierSection title="Invoiced" rows={grouped.invoiced} defaultOpen collapsible={false} />
-              <TierSection title="Completed" rows={tier3Rows} defaultOpen={false} collapsible />
+              <TierSection title="Open" rows={grouped.tier1} defaultOpen collapsible={false} />
+              <TierSection title="Fulfilled" rows={grouped.tier2} defaultOpen collapsible={false} />
+              <TierSection title="Invoiced" rows={grouped.invoiced} defaultOpen={false} collapsible />
+              {grouped.cancelled.length > 0 && (
+                <TierSection title="Cancelled" rows={grouped.cancelled} defaultOpen={false} collapsible />
+              )}
             </div>
           ) : (
             <div className="rounded-lg border border-border/50 overflow-hidden">

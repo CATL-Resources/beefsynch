@@ -61,8 +61,7 @@ const Billable = () => {
       `)
       .eq("organization_id", orgId)
       .eq("order_type", "customer")
-      .eq("fulfillment_status", "fulfilled")
-      .is("invoiced_at", null)
+      .eq("status", "fulfilled")
       .order("order_date", { ascending: true });
 
     const mappedOrders: BillableOrder[] = (orderRows ?? []).map((o: any) => {

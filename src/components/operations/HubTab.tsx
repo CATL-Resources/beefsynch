@@ -296,8 +296,7 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         `)
         .eq("organization_id", orgId)
         .eq("order_type", "customer")
-        .eq("billing_status", "unbilled")
-        .in("fulfillment_status", ["partially_fulfilled", "fulfilled"])
+        .eq("status", "fulfilled")
         .order("order_date", { ascending: true });
 
       // Per-order billable totals from get_billable_units_for_order RPC.
