@@ -146,7 +146,7 @@ const ProjectBilling = () => {
     if (firstPackId) {
       const { data: lines } = await supabase
         .from("tank_pack_lines")
-        .select("id, bull_catalog_id, bull_name, bull_code, field_canister, units, source_tank_id, source_canister, bulls_catalog(bull_name, naab_code)")
+        .select("id, bull_catalog_id, bull_name, bull_code, field_canister, units, source_tank_id, source_canister, is_billable, bulls_catalog(bull_name, naab_code)")
         .eq("tank_pack_id", firstPackId);
       setPackLines((lines as any[]) ?? []);
     } else {
@@ -996,13 +996,33 @@ const ProjectBilling = () => {
     // (equivalent to SUM(end_units) for a fully-filled session grid);
     // `units_blown` = SUM(blown_units); `units_billable` = packed - returned
     // - blown which simplifies to used - blown.
+    //
+    // A bull is customer-supplied when every pack_line for it on this
+    // project has `is_billable = false`. In that case the customer is just
+    // getting their own semen back — `units_billable` must stay at 0
+    // regardless of usage.
+    const nonBillableBulls = new Set<string>();
+    {
+      const billableSeen = new Set<string>();
+      const allKeys = new Set<string>();
+      for (const pl of packLines) {
+        const k = pl.bull_catalog_id || pl.bull_name;
+        if (!k) continue;
+        allKeys.add(k);
+        if (pl.is_billable !== false) billableSeen.add(k);
+      }
+      for (const k of allKeys) {
+        if (!billableSeen.has(k)) nonBillableBulls.add(k);
+      }
+    }
     let changed = false;
     const updated = semenLines.map((sl) => {
       const key = sl.bull_catalog_id || sl.bull_name;
       const used = bullUsed.get(key) ?? 0;
       const blown = bullBlown.get(key) ?? 0;
       const returned = Math.max(0, (sl.units_packed ?? 0) - used);
-      const billable = Math.max(0, used - blown);
+      const isNonBillable = nonBillableBulls.has(key);
+      const billable = isNonBillable ? 0 : Math.max(0, used - blown);
       const line_total = billable * (sl.unit_price ?? 0);
       if (
         sl.units_billable !== billable ||
@@ -1311,6 +1331,7 @@ const ProjectBilling = () => {
             open={closeOutOpen}
             onOpenChange={setCloseOutOpen}
             projectName={project?.name ?? ""}
+            projectId={projectId ?? ""}
             billingId={billingId}
             onConfirm={markProjectInvoiced}
           />

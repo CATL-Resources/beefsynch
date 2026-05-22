@@ -11,6 +11,7 @@ interface CloseOutReviewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectName: string;
+  projectId: string;
   billingId: string;
   onConfirm: () => void;
 }
@@ -28,11 +29,18 @@ type ProductRow = {
 };
 
 type SemenRow = {
+  bull_catalog_id: string | null;
   bull_name: string;
   unit_price: number | null;
   units_billable: number | null;
   invoicing_company_id: string | null;
   line_total: number | null;
+};
+
+type PackLineBillableRow = {
+  bull_catalog_id: string | null;
+  bull_name: string | null;
+  is_billable: boolean | null;
 };
 
 type SessionRow = { id: string; head_count: number | null };
@@ -57,20 +65,28 @@ const isCidr = (l: ProductRow) => {
 };
 
 export default function CloseOutReviewDialog({
-  open, onOpenChange, projectName, billingId, onConfirm,
+  open, onOpenChange, projectName, projectId, billingId, onConfirm,
 }: CloseOutReviewProps) {
   const { data, isLoading } = useQuery({
     queryKey: ["close_out_review", billingId, open],
     enabled: !!billingId && open,
     queryFn: async () => {
-      const [prods, semen, sess, inv] = await Promise.all([
+      // Get pack ids for the project so we can pull is_billable per pack line
+      // (project_billing_semen does not store is_billable directly).
+      const { data: packLinks } = await supabase
+        .from("tank_pack_projects")
+        .select("tank_pack_id")
+        .eq("project_id", projectId);
+      const packIds = (packLinks ?? []).map((l: any) => l.tank_pack_id).filter(Boolean);
+
+      const [prods, semen, sess, inv, packs] = await Promise.all([
         supabase
           .from("project_billing_products")
           .select("product_name, product_category, unit_price, units_billed, doses, delivery_method, line_total")
           .eq("billing_id", billingId),
         supabase
           .from("project_billing_semen")
-          .select("bull_name, unit_price, units_billable, invoicing_company_id, line_total")
+          .select("bull_catalog_id, bull_name, unit_price, units_billable, invoicing_company_id, line_total")
           .eq("billing_id", billingId),
         supabase
           .from("project_billing_sessions")
@@ -81,12 +97,19 @@ export default function CloseOutReviewDialog({
           .from("project_billing_session_inventory")
           .select("session_id, start_units, end_units, blown_units")
           .eq("billing_id", billingId),
+        packIds.length > 0
+          ? supabase
+              .from("tank_pack_lines")
+              .select("bull_catalog_id, bull_name, is_billable")
+              .in("tank_pack_id", packIds)
+          : Promise.resolve({ data: [] as PackLineBillableRow[] }),
       ]);
       return {
         productLines: (prods.data ?? []) as ProductRow[],
         semenLines: (semen.data ?? []) as SemenRow[],
         sessions: (sess.data ?? []) as SessionRow[],
         sessionInventory: (inv.data ?? []) as SessionInvRow[],
+        packLines: ((packs as any).data ?? []) as PackLineBillableRow[],
       };
     },
   });
@@ -96,7 +119,26 @@ export default function CloseOutReviewDialog({
     const warn: Check[] = [];
     const ok: Check[] = [];
     if (!data) return { critical: crit, warnings: warn, oks: ok };
-    const { productLines, semenLines, sessions, sessionInventory } = data;
+    const { productLines, semenLines, sessions, sessionInventory, packLines } = data;
+
+    // A bull is customer-supplied when every pack_line for it on this
+    // project is is_billable=false. Those rows don't need an invoicing
+    // company or a price — skip them in the checks below.
+    const nonBillableBulls = (() => {
+      const billable = new Set<string>();
+      const all = new Set<string>();
+      for (const pl of packLines) {
+        const k = pl.bull_catalog_id || pl.bull_name || "";
+        if (!k) continue;
+        all.add(k);
+        if (pl.is_billable !== false) billable.add(k);
+      }
+      const out = new Set<string>();
+      for (const k of all) if (!billable.has(k)) out.add(k);
+      return out;
+    })();
+    const isBillableSemenLine = (s: SemenRow) =>
+      !nonBillableBulls.has(s.bull_catalog_id || s.bull_name);
 
     const hasEnds = sessionInventory.some((r) => r.end_units != null);
     if (hasEnds) ok.push({ kind: "ok", message: "Session end values filled" });
@@ -146,16 +188,22 @@ export default function CloseOutReviewDialog({
       }
     }
 
+    const billableSemen = semenLines.filter(isBillableSemenLine);
     if (semenLines.length === 0) {
       warn.push({ kind: "warn", message: "No semen billable lines" });
+    } else if (billableSemen.length === 0) {
+      ok.push({ kind: "ok", message: "All semen is customer-supplied — nothing to bill" });
     } else {
-      const allHaveCompany = semenLines.every((s) => !!s.invoicing_company_id);
-      if (!allHaveCompany) {
-        crit.push({ kind: "fail", message: "Some semen lines have no invoicing company" });
+      const linesWithNoCompany = billableSemen.filter((s) => !s.invoicing_company_id);
+      if (linesWithNoCompany.length > 0) {
+        crit.push({
+          kind: "fail",
+          message: `Semen missing invoicing company: ${linesWithNoCompany.map((s) => s.bull_name).join(", ")}`,
+        });
       } else {
-        ok.push({ kind: "ok", message: "All semen lines have an invoicing company" });
+        ok.push({ kind: "ok", message: "All billable semen lines have an invoicing company" });
       }
-      const missingPrice = semenLines.filter(
+      const missingPrice = billableSemen.filter(
         (s) => (s.units_billable ?? 0) > 0 && (!s.unit_price || s.unit_price <= 0),
       );
       if (missingPrice.length > 0) {
@@ -164,13 +212,13 @@ export default function CloseOutReviewDialog({
           message: `Semen missing price: ${missingPrice.map((s) => s.bull_name).join(", ")}`,
         });
       }
-      const semenTotal = semenLines.reduce((s, l) => s + (l.line_total ?? 0), 0);
+      const semenTotal = billableSemen.reduce((s, l) => s + (l.line_total ?? 0), 0);
       if (semenTotal === 0) {
         warn.push({ kind: "warn", message: "Semen billable total is $0 — prices not filled in?" });
       } else {
         ok.push({
           kind: "ok",
-          message: `Semen billable: ${semenLines.length} bull${semenLines.length === 1 ? "" : "s"}, $${semenTotal.toFixed(2)}`,
+          message: `Semen billable: ${billableSemen.length} bull${billableSemen.length === 1 ? "" : "s"}, $${semenTotal.toFixed(2)}`,
         });
       }
     }
