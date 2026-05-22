@@ -2506,7 +2506,7 @@ export type Database = {
       tank_inventory: {
         Row: {
           bull_catalog_id: string
-          bull_code: string
+          bull_code: string | null
           canister: string
           created_at: string
           custom_bull_name: string | null
@@ -2529,7 +2529,7 @@ export type Database = {
         }
         Insert: {
           bull_catalog_id: string
-          bull_code: string
+          bull_code?: string | null
           canister: string
           created_at?: string
           custom_bull_name?: string | null
@@ -2552,7 +2552,7 @@ export type Database = {
         }
         Update: {
           bull_catalog_id?: string
-          bull_code?: string
+          bull_code?: string | null
           canister?: string
           created_at?: string
           custom_bull_name?: string | null

@@ -27,6 +27,23 @@ export interface BullNameSource {
   } | null;
 }
 
+// Legacy rows stored the literal string "Unknown" in `bull_code` whenever a
+// NAAB code wasn't supplied — typically customer-owned bulls. Treat that as
+// "no code" so the UI never shows the word "Unknown" where a code belongs.
+export function normalizeBullCode(code: string | null | undefined): string | null {
+  if (code == null) return null;
+  const trimmed = code.trim();
+  if (!trimmed) return null;
+  if (trimmed.toLowerCase() === "unknown") return null;
+  return trimmed;
+}
+
+// Format a code for display: real code or an em-dash. Use in table cells and
+// inline labels where you'd otherwise write `code || "—"`.
+export function formatBullCode(code: string | null | undefined): string {
+  return normalizeBullCode(code) ?? "—";
+}
+
 /**
  * Get the display name for a bull-holding row. Use this in every table cell,
  * card header, and detail heading that shows a bull name.
@@ -36,19 +53,20 @@ export function getBullDisplayName(row: BullNameSource | null | undefined): stri
   if (row.custom_bull_name?.trim()) return row.custom_bull_name.trim();
   const catalog = row.bulls_catalog ?? row.bull_catalog;
   if (catalog?.bull_name?.trim()) return catalog.bull_name.trim();
-  if (row.bull_code?.trim()) return row.bull_code.trim();
+  const code = normalizeBullCode(row.bull_code);
+  if (code) return code;
   return "Unknown";
 }
 
 /**
  * Get the NAAB code for a bull-holding row.
  * Prefers bulls_catalog.naab_code (source of truth), falls back to bull_code on the row.
+ * Returns null for missing codes and for the legacy "Unknown" placeholder.
  */
 export function getBullDisplayCode(row: BullNameSource | null | undefined): string | null {
   if (!row) return null;
   const catalog = row.bulls_catalog ?? row.bull_catalog;
-  const code = catalog?.naab_code?.trim() || row.bull_code?.trim() || "";
-  return code || null;
+  return normalizeBullCode(catalog?.naab_code) ?? normalizeBullCode(row.bull_code);
 }
 
 /**

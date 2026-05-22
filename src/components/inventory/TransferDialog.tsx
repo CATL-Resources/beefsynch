@@ -392,7 +392,7 @@ export default function TransferDialog({
         // just bump units on an existing row or create one, and log a
         // `received` transaction for the audit trail.
         const addUnits = Number(receiveAddUnits);
-        const resolvedBullCode = bullCode || sourceRow.bulls_catalog?.naab_code || "Unknown";
+        const resolvedBullCode = bullCode || sourceRow.bulls_catalog?.naab_code || null;
         let landedTankId = effectiveTankId;
         let landedInventoryId: string | null = sourceRow.id;
 
