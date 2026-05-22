@@ -25,8 +25,13 @@ type PackLineRow = {
   semen_companies?: { name: string } | null;
 };
 
-function companyBadge(name: string | null | undefined) {
-  if (!name) return <Badge variant="outline" className="bg-gray-500/10 text-gray-300 border-gray-500/30 text-[10px]">Unknown</Badge>;
+function companyBadge(name: string | null | undefined, isBillable: boolean | null | undefined) {
+  // Customer-supplied semen has no invoicing company — surface that instead
+  // of the generic "Unknown" badge.
+  if (isBillable === false) {
+    return <Badge variant="outline" className="bg-purple-500/10 text-purple-300 border-purple-500/30 text-[10px]">Customer Supplied</Badge>;
+  }
+  if (!name) return <Badge variant="outline" className="bg-gray-500/10 text-gray-300 border-gray-500/30 text-[10px]">—</Badge>;
   if (/select/i.test(name)) return <Badge variant="outline" className="bg-blue-500/15 text-blue-300 border-blue-400/40 text-[10px]">{name}</Badge>;
   if (/catl/i.test(name)) return <Badge variant="outline" className="bg-amber-500/15 text-amber-300 border-amber-400/40 text-[10px]">{name}</Badge>;
   return <Badge variant="outline" className="text-[10px]">{name}</Badge>;
@@ -142,7 +147,7 @@ export default function SemenPacked({ projectId, isEditing, onToggleEdit, locked
                     {r.is_billable === false ? "No" : "Yes"}
                   </button>
                 </td>
-                <td className="px-3 py-2">{companyBadge(r.semen_companies?.name)}</td>
+                <td className="px-3 py-2">{companyBadge(r.semen_companies?.name, r.is_billable)}</td>
               </tr>
             ))}
           </tbody>
