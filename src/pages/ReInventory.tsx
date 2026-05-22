@@ -462,9 +462,17 @@ const ReInventory = () => {
                         <BullCombobox
                           value={nr.bull_name}
                           catalogId={nr.bull_catalog_id}
-                          onChange={(name, catId) => {
+                          onChange={(name, catId, naabCode) => {
                             updateNewRow(i, "bull_name", name);
                             updateNewRow(i, "bull_catalog_id", catId);
+                            // Auto-fill the code from the catalog pick. Users
+                            // can still override the input afterwards. Custom
+                            // bulls without a NAAB pass an empty/null code,
+                            // which the RPC + display layer treat as "no
+                            // code".
+                            if (catId) {
+                              updateNewRow(i, "bull_code", naabCode ?? "");
+                            }
                           }}
                         />
                       </TableCell>
