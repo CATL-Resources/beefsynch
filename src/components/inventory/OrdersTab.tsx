@@ -75,7 +75,6 @@ const OrdersTab = ({ orgId }: { orgId: string }) => {
   useEffect(() => {
     setSearch("");
     setChipFilter("all");
-    setOrderStatusFilter("all");
     setDateFrom(undefined);
     setDateTo(undefined);
   }, [subTab]);
