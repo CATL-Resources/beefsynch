@@ -429,6 +429,10 @@ export default function SemenSessions({ billingId, projectId, organizationId, is
             queryClient.invalidateQueries({ queryKey: ["semen_session_inventory_v2", billingId] });
             queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
             queryClient.invalidateQueries({ queryKey: ["semen_packed_v2", projectId] });
+            // Refresh the pack lookup that gates the Unpack button — once the
+            // pack flips to 'unpacked' this query returns null and the button
+            // disappears without a page reload.
+            queryClient.invalidateQueries({ queryKey: ["semen_sessions_pack_v2", projectId] });
           }}
         />
       )}
