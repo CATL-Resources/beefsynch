@@ -931,12 +931,21 @@ const ProjectBilling = () => {
   }
 
   /* ── Print PDF ── */
-  function handlePrint() {
-    if (!project || !billingRecord) return;
-    const productsTotal = productLines.reduce((s, l) => s + (l.line_total ?? 0), 0);
-    const semenTotal = semenLines.reduce((s, l) => s + (l.line_total ?? 0), 0);
+  async function handlePrint() {
+    if (!project || !billingRecord || !billingId) return;
+    // Fetch fresh products + semen at print time. The sub-sections write
+    // directly to the DB, so the parent's productLines/semenLines snapshot
+    // can be stale (e.g. products added after mount were missing from the PDF).
+    const [prodRes, semenRes] = await Promise.all([
+      supabase.from("project_billing_products").select("*").eq("billing_id", billingId).order("sort_order"),
+      supabase.from("project_billing_semen").select("*").eq("billing_id", billingId).order("sort_order"),
+    ]);
+    const prods = (prodRes.data ?? []) as ProductLine[];
+    const sem = (semenRes.data ?? []) as SemenLine[];
+    const productsTotal = prods.reduce((s, l) => s + (l.line_total ?? 0), 0);
+    const semenTotal = sem.reduce((s, l) => s + (l.line_total ?? 0), 0);
     const grandTotal = productsTotal + semenTotal;
-    generateBillingSheetPdf(project, billingRecord, productLines, semenLines, {
+    generateBillingSheetPdf(project, billingRecord, prods, sem, {
       productsTotal, semenTotal, laborTotal: 0, grandTotal,
     });
     toast({ title: "PDF downloaded" });
