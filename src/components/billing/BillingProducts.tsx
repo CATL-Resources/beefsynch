@@ -92,7 +92,11 @@ export default function BillingProducts({ billingId, orgId, isEditing, onToggleE
     },
   });
 
-  const refetch = () => queryClient.invalidateQueries({ queryKey: ["billing_products_v2", billingId] });
+  const refetch = () => {
+    queryClient.invalidateQueries({ queryKey: ["billing_products_v2", billingId] });
+    // Keep the invoicing section's product total in sync.
+    queryClient.invalidateQueries({ queryKey: ["billing_invoice_products_v2", billingId] });
+  };
 
   const computeLineTotal = (units_billed: number | null, unit_price: number | null) =>
     Number((Number(units_billed ?? 0) * Number(unit_price ?? 0)).toFixed(2));

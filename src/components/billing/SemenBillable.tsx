@@ -156,7 +156,11 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
     return m;
   }, [invRows, sessionMeta]);
 
-  const refetch = () => queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
+  const refetch = () => {
+    queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
+    // Keep the invoicing section's semen totals in sync.
+    queryClient.invalidateQueries({ queryKey: ["billing_invoice_semen_v2", billingId] });
+  };
 
   // One-shot auto-fill: once unpack populates session End values, push them
   // into project_billing_semen.units_returned and recompute units_billable +
