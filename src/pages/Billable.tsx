@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { format, parseISO } from "date-fns";
-import { CheckCircle2, ChevronRight, Loader2, Printer } from "lucide-react";
+import { CheckCircle2, ChevronRight, Loader2, Printer, AlertTriangle } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useOrgRole } from "@/hooks/useOrgRole";
@@ -91,7 +91,7 @@ const Billable = () => {
       .select(`
         id, name, breeding_date, customer_id,
         customers!projects_customer_id_fkey(name),
-        project_billing(id)
+        project_billing(id, billing_completed_at, catl_invoice_number, select_sires_invoice_number)
       `)
       .eq("organization_id", orgId)
       .eq("status", "Ready to Bill");
@@ -100,6 +100,11 @@ const Billable = () => {
       .map((p: any) => {
         const billing = Array.isArray(p.project_billing) ? p.project_billing[0] : p.project_billing;
         if (!billing?.id) return null;
+        // Exclude already-invoiced projects so the Billable page and the Hub
+        // preview agree: a project is "ready to invoice" only when it hasn't
+        // been stamped complete and has no invoice number yet.
+        if (billing.billing_completed_at) return null;
+        if (billing.catl_invoice_number || billing.select_sires_invoice_number) return null;
         return {
           id: p.id,
           name: p.name,
@@ -174,13 +179,23 @@ const Billable = () => {
                 </CardContent>
               </Card>
             ) : (
-              ordersByCompany.map(([company, list]) => (
-                <Card key={company}>
+              ordersByCompany.map(([company, list]) => {
+                const isUnassigned = company === "Unassigned";
+                return (
+                <Card key={company} className={isUnassigned ? "border-amber-500/40" : undefined}>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center justify-between">
-                      <span>{company}</span>
+                      <span className={isUnassigned ? "flex items-center gap-1.5 text-amber-500" : ""}>
+                        {isUnassigned && <AlertTriangle className="h-4 w-4" />}
+                        {company}
+                      </span>
                       <Badge variant="outline">{list.length} order{list.length !== 1 ? "s" : ""}</Badge>
                     </CardTitle>
+                    {isUnassigned && (
+                      <p className="text-xs text-amber-500">
+                        These orders need an invoicing company assigned before they can be billed.
+                      </p>
+                    )}
                   </CardHeader>
                   <CardContent className="p-0">
                     <div className="divide-y divide-border">
@@ -215,7 +230,8 @@ const Billable = () => {
                     </div>
                   </CardContent>
                 </Card>
-              ))
+                );
+              })
             )}
 
             {/* ── Projects section ── */}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { getBullDisplayName, getBullDisplayLabel } from "@/lib/bullDisplay";
 import { format, parseISO, addDays, startOfDay } from "date-fns";
@@ -870,71 +870,34 @@ const HubTab = ({ orgId, onSwitchTab }: HubTabProps) => {
         </div>
       </section>
 
-      {/* READY TO INVOICE */}
-      {readyToInvoice.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-lg font-semibold font-display">Ready to invoice</h2>
-              <Link to="/billable" className="text-xs text-primary hover:underline">
-                Open full report →
-              </Link>
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {readyToInvoice.length} item{readyToInvoice.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <div className="divide-y divide-border">
-                {readyToInvoice.map((o) => (
-                  <div
-                    key={o.id}
-                    className="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr_auto] gap-3 p-4 items-center"
-                  >
-                    <div className="min-w-0">
-                      <Link
-                        to={o.type === "project" ? `/project/${o.id}/billing` : `/semen-orders/${o.id}`}
-                        className="font-medium text-sm hover:text-primary block truncate"
-                      >
-                        {o.customerName}
-                      </Link>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-xs text-muted-foreground">
-                          {o.type === "project" ? "Project" : "Order"}{o.orderDate ? ` · ${format(parseISO(o.orderDate), "MMM d")}` : ""}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      {o.type === "order" ? (
-                        <>
-                          <p className="text-sm truncate">{o.bullSummary}</p>
-                          <p className="text-xs text-muted-foreground capitalize">
-                            {o.fulfillmentStatus.replace(/_/g, " ")} · {o.unitsFilled} of {o.unitsOrdered} · billable {o.unitsBillable}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-xs text-muted-foreground capitalize">
-                          {o.fulfillmentStatus.replace(/_/g, " ")}
-                        </p>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        navigate(o.type === "project" ? `/project/${o.id}/billing` : `/semen-orders/${o.id}`)
-                      }
-                    >
-                      Open
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-      )}
+      {/* READY TO INVOICE — compact preview; the full workspace is /billable */}
+      {readyToInvoice.length > 0 && (() => {
+        const orderCount = readyToInvoice.filter((o) => o.type === "order").length;
+        const projectCount = readyToInvoice.filter((o) => o.type === "project").length;
+        const parts: string[] = [];
+        if (orderCount > 0) parts.push(`${orderCount} order${orderCount !== 1 ? "s" : ""}`);
+        if (projectCount > 0) parts.push(`${projectCount} project${projectCount !== 1 ? "s" : ""}`);
+        return (
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold font-display">Ready to invoice</h2>
+            <Card>
+              <CardContent className="flex items-center justify-between gap-3 p-4">
+                <div className="flex items-center gap-2 min-w-0">
+                  <DollarSign className="h-5 w-5 text-emerald-500 shrink-0" />
+                  <p className="text-sm">
+                    <span className="font-semibold">{parts.join(" · ")}</span>
+                    <span className="text-muted-foreground"> ready to invoice</span>
+                  </p>
+                </div>
+                <Button size="sm" onClick={() => navigate("/billable")}>
+                  Open Billable Report
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </CardContent>
+            </Card>
+          </section>
+        );
+      })()}
 
       {/* TANKS PACKED OUT */}
       {packedOut.length > 0 && (
