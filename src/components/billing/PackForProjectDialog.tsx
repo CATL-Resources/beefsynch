@@ -23,7 +23,12 @@ interface PackForProjectDialogProps {
   onPackComplete: () => void;
 }
 
-type FieldTank = { id: string; tank_name: string | null; tank_number: string };
+type FieldTank = {
+  id: string;
+  tank_name: string | null;
+  tank_number: string;
+  activePackProjects?: string[]; // project names of any active packs already on this tank
+};
 
 type InventoryRow = {
   id: string;
@@ -174,7 +179,7 @@ export default function PackForProjectDialog({
     if (!open) return;
     let cancelled = false;
     (async () => {
-      const [tanksRes, projectsRes, parentProjRes] = await Promise.all([
+      const [tanksRes, projectsRes, parentProjRes, activePacksRes] = await Promise.all([
         supabase
           .from("tanks")
           .select("id, tank_name, tank_number, tank_type, nitrogen_status, location_status")
@@ -193,10 +198,49 @@ export default function PackForProjectDialog({
           .select("id, name, customer_id")
           .eq("id", projectId)
           .maybeSingle(),
+        // Tanks that are out in the field but still hold an active pack — a
+        // second project can share the tank (its own canisters, its own pack).
+        supabase
+          .from("tank_packs")
+          .select("field_tank_id, status, tanks:field_tank_id(id, tank_name, tank_number), tank_pack_projects(projects(name))")
+          .eq("organization_id", organizationId)
+          .eq("status", "packed"),
       ]);
       if (cancelled) return;
       if (tanksRes.error) toast({ title: "Could not load tanks", description: tanksRes.error.message, variant: "destructive" });
-      setFieldTanks((tanksRes.data ?? []) as FieldTank[]);
+
+      // Map of tank id → active-pack project names.
+      const activeByTank = new Map<string, string[]>();
+      for (const pk of (activePacksRes.data ?? []) as any[]) {
+        const tid = pk.field_tank_id;
+        if (!tid) continue;
+        const names = (pk.tank_pack_projects ?? [])
+          .map((tpp: any) => tpp.projects?.name)
+          .filter(Boolean) as string[];
+        const cur = activeByTank.get(tid) ?? [];
+        activeByTank.set(tid, [...cur, ...names]);
+      }
+
+      const wetHere = (tanksRes.data ?? []) as FieldTank[];
+      const haveIds = new Set(wetHere.map((t) => t.id));
+      const merged: FieldTank[] = wetHere.map((t) => ({
+        ...t,
+        activePackProjects: activeByTank.get(t.id),
+      }));
+      // Add out-in-field tanks that have an active pack and aren't already listed.
+      for (const pk of (activePacksRes.data ?? []) as any[]) {
+        const tank = pk.tanks;
+        if (!tank || haveIds.has(tank.id)) continue;
+        haveIds.add(tank.id);
+        merged.push({
+          id: tank.id,
+          tank_name: tank.tank_name,
+          tank_number: tank.tank_number,
+          activePackProjects: activeByTank.get(tank.id),
+        });
+      }
+      merged.sort((a, b) => (a.tank_number || "").localeCompare(b.tank_number || "", undefined, { numeric: true }));
+      setFieldTanks(merged);
       // Make sure the parent project is always selectable even if its status
       // doesn't match the filter (e.g. already In Field with a prior pack).
       const projects = (projectsRes.data ?? []) as ProjectOption[];
@@ -587,16 +631,33 @@ export default function PackForProjectDialog({
                         <CommandGroup>
                           {fieldTanks.map((t) => {
                             const label = t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `Tank #${t.tank_number}`;
+                            const active = t.activePackProjects ?? [];
                             return (
                               <CommandItem
                                 key={t.id}
                                 // Include both name and number so either matches the search.
                                 value={`${t.tank_name ?? ""} ${t.tank_number}`}
-                                onSelect={() => { setSelectedFieldTankId(t.id); setFieldTankPickerOpen(false); }}
+                                onSelect={() => {
+                                  if (active.length > 0) {
+                                    const ok = window.confirm(
+                                      `This tank already has an active pack for ${active.join(", ")}. Continue packing into it?`,
+                                    );
+                                    if (!ok) return;
+                                  }
+                                  setSelectedFieldTankId(t.id);
+                                  setFieldTankPickerOpen(false);
+                                }}
                                 className="flex items-center justify-between gap-2"
                               >
-                                <span className="text-sm">{label}</span>
-                                {t.id === selectedFieldTankId && <Check className="h-4 w-4 text-primary" />}
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <span className="text-sm truncate">{label}</span>
+                                  {active.length > 0 && (
+                                    <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-500 px-1.5 py-0.5 shrink-0">
+                                      Active: {active.join(", ")}
+                                    </span>
+                                  )}
+                                </span>
+                                {t.id === selectedFieldTankId && <Check className="h-4 w-4 text-primary shrink-0" />}
                               </CommandItem>
                             );
                           })}
@@ -605,6 +666,16 @@ export default function PackForProjectDialog({
                     </Command>
                   </PopoverContent>
                 </Popover>
+              );
+            })()}
+            {(() => {
+              const selected = fieldTanks.find((t) => t.id === selectedFieldTankId);
+              const active = selected?.activePackProjects ?? [];
+              if (active.length === 0) return null;
+              return (
+                <p className="text-[11px] text-amber-500">
+                  Already packed for {active.join(", ")} — this creates a separate pack sharing the tank.
+                </p>
               );
             })()}
           </div>
