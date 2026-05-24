@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Trash2, X, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, X, Check, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useOrgRole } from "@/hooks/useOrgRole";
@@ -158,6 +158,7 @@ export default function PackForProjectDialog({
   const [availableProjects, setAvailableProjects] = useState<ProjectOption[]>([]);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [fieldTankPickerOpen, setFieldTankPickerOpen] = useState(false);
 
   // Reset on open. Always seed with the parent project.
   useEffect(() => {
@@ -553,22 +554,59 @@ export default function PackForProjectDialog({
         </DialogHeader>
 
         <div className="space-y-5">
-          {/* Field tank picker */}
+          {/* Field tank picker — type-ahead combobox over wet/here tanks */}
           <div className="space-y-1.5">
             <Label htmlFor="field-tank">Field tank</Label>
-            <select
-              id="field-tank"
-              value={selectedFieldTankId}
-              onChange={(e) => setSelectedFieldTankId(e.target.value)}
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">Select a tank…</option>
-              {fieldTanks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `Tank #${t.tank_number}`} — wet, here
-                </option>
-              ))}
-            </select>
+            {(() => {
+              const selected = fieldTanks.find((t) => t.id === selectedFieldTankId);
+              const selectedLabel = selected
+                ? (selected.tank_name ? `${selected.tank_name} (#${selected.tank_number})` : `Tank #${selected.tank_number}`)
+                : "Select a tank…";
+              return (
+                <Popover open={fieldTankPickerOpen} onOpenChange={setFieldTankPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="field-tank"
+                      variant="outline"
+                      role="combobox"
+                      className={`h-9 w-full justify-between font-normal ${selected ? "" : "text-muted-foreground"}`}
+                    >
+                      {selectedLabel}
+                      <Search className="h-4 w-4 opacity-50 shrink-0" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command
+                      filter={(value, search) =>
+                        value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+                      }
+                    >
+                      <CommandInput placeholder="Search tank name or number…" className="h-9" />
+                      <CommandList>
+                        <CommandEmpty>No wet tanks here.</CommandEmpty>
+                        <CommandGroup>
+                          {fieldTanks.map((t) => {
+                            const label = t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `Tank #${t.tank_number}`;
+                            return (
+                              <CommandItem
+                                key={t.id}
+                                // Include both name and number so either matches the search.
+                                value={`${t.tank_name ?? ""} ${t.tank_number}`}
+                                onSelect={() => { setSelectedFieldTankId(t.id); setFieldTankPickerOpen(false); }}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <span className="text-sm">{label}</span>
+                                {t.id === selectedFieldTankId && <Check className="h-4 w-4 text-primary" />}
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
           </div>
 
           {/* Multi-project picker */}
