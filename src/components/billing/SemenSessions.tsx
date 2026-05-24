@@ -124,7 +124,15 @@ export default function SemenSessions({ billingId, projectId, organizationId, is
   }, [inventory]);
 
   const refetchSessions = () => queryClient.invalidateQueries({ queryKey: ["semen_sessions_v2", billingId] });
-  const refetchInventory = () => queryClient.invalidateQueries({ queryKey: ["semen_session_inventory_v2", billingId] });
+  const refetchInventory = () => {
+    queryClient.invalidateQueries({ queryKey: ["semen_session_inventory_v2", billingId] });
+    // The billable summary derives Used/Blown/Returned from this session
+    // inventory; refresh its copy (and the invoicing totals downstream) so
+    // the numbers update without a page reload.
+    queryClient.invalidateQueries({ queryKey: ["semen_billable_session_inv_v2", billingId] });
+    queryClient.invalidateQueries({ queryKey: ["semen_billable_v2", billingId] });
+    queryClient.invalidateQueries({ queryKey: ["billing_invoice_semen_v2", billingId] });
+  };
 
   const saveSessionField = async (id: string, field: "session_date" | "head_count", value: any) => {
     const { error } = await supabase
