@@ -162,7 +162,7 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
           </Button>
           {currentStatus !== "Invoiced" ? (
             <Button variant="destructive" size="sm" className="h-9" onClick={onCloseOut}>
-              Close out
+              Close Out
             </Button>
           ) : (
             <span className="text-sm text-purple-500 font-semibold">✓ Invoiced</span>

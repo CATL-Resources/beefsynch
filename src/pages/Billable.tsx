@@ -10,6 +10,7 @@ import { getBullDisplayLabel } from "@/lib/bullDisplay";
 
 import Navbar from "@/components/Navbar";
 import AppFooter from "@/components/AppFooter";
+import CloseOutReviewDialog from "@/components/billing/CloseOutReviewDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ const Billable = () => {
   const [orders, setOrders] = useState<BillableOrder[]>([]);
   const [projects, setProjects] = useState<BillableProject[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [closeOutProject, setCloseOutProject] = useState<BillableProject | null>(null);
 
   const load = async () => {
     if (!orgId) return;
@@ -272,16 +274,9 @@ const Billable = () => {
                         </Button>
                         <Button
                           size="sm"
-                          disabled={savingId === p.billing_id}
-                          onClick={() => markProjectInvoiced(p)}
+                          onClick={() => setCloseOutProject(p)}
                         >
-                          {savingId === p.billing_id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <CheckCircle2 className="h-4 w-4 mr-1" /> Mark Invoiced
-                            </>
-                          )}
+                          <CheckCircle2 className="h-4 w-4 mr-1" /> Close Out
                         </Button>
                       </div>
                     ))}
@@ -292,6 +287,16 @@ const Billable = () => {
           </>
         )}
       </div>
+      {closeOutProject && (
+        <CloseOutReviewDialog
+          open={!!closeOutProject}
+          onOpenChange={(o) => { if (!o) setCloseOutProject(null); }}
+          projectName={closeOutProject.name}
+          projectId={closeOutProject.id}
+          billingId={closeOutProject.billing_id}
+          onConfirm={() => { void markProjectInvoiced(closeOutProject); }}
+        />
+      )}
       <AppFooter />
     </div>
   );

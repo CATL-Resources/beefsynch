@@ -1,11 +1,14 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, AlertTriangle, XCircle, Loader2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
+
+const SELECT_SIRES_ID = "630b12de-74bc-407a-8ee5-1ea17df18881";
 
 interface CloseOutReviewProps {
   open: boolean;
@@ -79,7 +82,7 @@ export default function CloseOutReviewDialog({
         .eq("project_id", projectId);
       const packIds = (packLinks ?? []).map((l: any) => l.tank_pack_id).filter(Boolean);
 
-      const [prods, semen, sess, inv, packs] = await Promise.all([
+      const [prods, semen, sess, inv, packs, billing] = await Promise.all([
         supabase
           .from("project_billing_products")
           .select("product_name, product_category, unit_price, units_billed, doses, delivery_method, line_total")
@@ -103,6 +106,11 @@ export default function CloseOutReviewDialog({
               .select("bull_catalog_id, bull_name, is_billable")
               .in("tank_pack_id", packIds)
           : Promise.resolve({ data: [] as PackLineBillableRow[] }),
+        supabase
+          .from("project_billing")
+          .select("select_sires_invoice_number, catl_invoice_number")
+          .eq("id", billingId)
+          .maybeSingle(),
       ]);
       return {
         productLines: (prods.data ?? []) as ProductRow[],
@@ -110,9 +118,45 @@ export default function CloseOutReviewDialog({
         sessions: (sess.data ?? []) as SessionRow[],
         sessionInventory: (inv.data ?? []) as SessionInvRow[],
         packLines: ((packs as any).data ?? []) as PackLineBillableRow[],
+        selectInvoiceNumber: ((billing as any).data?.select_sires_invoice_number ?? "") as string,
+        catlInvoiceNumber: ((billing as any).data?.catl_invoice_number ?? "") as string,
       };
     },
   });
+
+  // Optional invoice numbers entered at close-out. A company only needs one
+  // when it has billable dollars; we prefill from any number already saved
+  // in the Invoicing section.
+  const [selectInv, setSelectInv] = useState("");
+  const [catlInv, setCatlInv] = useState("");
+  useEffect(() => {
+    if (data) {
+      setSelectInv(data.selectInvoiceNumber ?? "");
+      setCatlInv(data.catlInvoiceNumber ?? "");
+    }
+  }, [data]);
+
+  // Per-company billable totals decide which invoice-number inputs to show.
+  const selectTotal = (data?.semenLines ?? [])
+    .filter((s) => s.invoicing_company_id === SELECT_SIRES_ID)
+    .reduce((sum, s) => sum + (s.line_total ?? 0), 0);
+  const catlSemen = (data?.semenLines ?? [])
+    .filter((s) => s.invoicing_company_id !== SELECT_SIRES_ID)
+    .reduce((sum, s) => sum + (s.line_total ?? 0), 0);
+  const productsTotal = (data?.productLines ?? []).reduce((sum, p) => sum + (p.line_total ?? 0), 0);
+  const catlTotal = catlSemen + productsTotal;
+
+  const handleCloseOut = async () => {
+    // Persist any invoice numbers entered here before finalizing.
+    const patch: Record<string, string | null> = {};
+    if (selectTotal > 0) patch.select_sires_invoice_number = selectInv.trim() || null;
+    if (catlTotal > 0) patch.catl_invoice_number = catlInv.trim() || null;
+    if (Object.keys(patch).length > 0) {
+      await supabase.from("project_billing").update(patch).eq("id", billingId);
+    }
+    onConfirm();
+    onOpenChange(false);
+  };
 
   const { critical, warnings, oks } = useMemo(() => {
     const crit: Check[] = [];
@@ -252,9 +296,10 @@ export default function CloseOutReviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Close-out review — {projectName}</DialogTitle>
+          <DialogTitle>Close Out Project — {projectName}</DialogTitle>
           <DialogDescription>
-            Review the checklist before marking this project invoiced.
+            Review the checklist, then enter an invoice number if available (or
+            leave blank to close without one).
           </DialogDescription>
         </DialogHeader>
 
@@ -288,10 +333,38 @@ export default function CloseOutReviewDialog({
         {!isLoading && (
           <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             {critical.length > 0
-              ? `${critical.length} issue${critical.length === 1 ? "" : "s"} to fix before invoicing.`
+              ? `${critical.length} issue${critical.length === 1 ? "" : "s"} to fix before closing out.`
               : warnings.length > 0
                 ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} — review and confirm.`
                 : "All checks passed."}
+          </div>
+        )}
+
+        {!isLoading && canProceed && (selectTotal > 0 || catlTotal > 0) && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">Invoice number (optional)</div>
+            {selectTotal > 0 && (
+              <label className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">Select Sires</span>
+                <Input
+                  className="h-8 w-48 text-sm"
+                  value={selectInv}
+                  onChange={(e) => setSelectInv(e.target.value)}
+                  placeholder="Invoice #"
+                />
+              </label>
+            )}
+            {catlTotal > 0 && (
+              <label className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">CATL Resources</span>
+                <Input
+                  className="h-8 w-48 text-sm"
+                  value={catlInv}
+                  onChange={(e) => setCatlInv(e.target.value)}
+                  placeholder="Invoice #"
+                />
+              </label>
+            )}
           </div>
         )}
 
@@ -300,9 +373,9 @@ export default function CloseOutReviewDialog({
           <Button
             disabled={!canProceed}
             className="bg-purple-600 hover:bg-purple-600/90 text-white"
-            onClick={() => { onConfirm(); onOpenChange(false); }}
+            onClick={handleCloseOut}
           >
-            {canProceed ? "Invoice anyway →" : "Fix issues to continue"}
+            {canProceed ? "Close Out" : "Fix issues to continue"}
           </Button>
         </DialogFooter>
       </DialogContent>
