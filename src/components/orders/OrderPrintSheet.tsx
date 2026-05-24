@@ -23,8 +23,19 @@ interface OrderPrintSheetProps {
   }>;
   /** Map keyed by bull_catalog_id || custom_bull_name → fulfilled units. */
   fulfilledByBull?: Map<string, number>;
+  /** Product/supply line items billed on this order. */
+  products?: Array<{
+    id: string;
+    product_name: string;
+    quantity: number | null;
+    unit_label: string | null;
+    unit_price: number | null;
+    line_total: number | null;
+  }>;
   customerName: string;
 }
+
+const money = (n: number | null | undefined) => `$${(Number(n) || 0).toFixed(2)}`;
 
 const SELECT_SIRES_ID = "630b12de-74bc-407a-8ee5-1ea17df18881";
 
@@ -39,7 +50,7 @@ function invoicingCompanyName(id: string | null): string {
  * `print-sheet` class so SemenOrderDetail can layer in `@media print` rules
  * that flip the screen UI off and this sheet on.
  */
-export function OrderPrintSheet({ order, items, fulfilledByBull, customerName }: OrderPrintSheetProps) {
+export function OrderPrintSheet({ order, items, fulfilledByBull, products = [], customerName }: OrderPrintSheetProps) {
   const isInvoiced = !!order.invoiced_at;
   const company = invoicingCompanyName(order.invoicing_company_id);
 
@@ -131,6 +142,40 @@ export function OrderPrintSheet({ order, items, fulfilledByBull, customerName }:
           </tr>
         </tbody>
       </table>
+
+      {products.length > 0 && (
+        <>
+          <div className="mt-6 text-sm font-semibold uppercase tracking-wide text-gray-700">Products &amp; Services</div>
+          <table className="w-full mt-2 text-sm border-collapse">
+            <thead>
+              <tr className="border-b-2 border-black text-left">
+                <th className="py-2 pr-2">Product</th>
+                <th className="py-2 pr-2 text-right w-20">Qty</th>
+                <th className="py-2 pr-2 w-20">Unit</th>
+                <th className="py-2 pr-2 text-right w-24">Price</th>
+                <th className="py-2 text-right w-24">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((p) => (
+                <tr key={p.id} className="border-b border-gray-300">
+                  <td className="py-2 pr-2">{p.product_name}</td>
+                  <td className="py-2 pr-2 text-right">{p.quantity ?? "—"}</td>
+                  <td className="py-2 pr-2">{p.unit_label || "—"}</td>
+                  <td className="py-2 pr-2 text-right">{money(p.unit_price)}</td>
+                  <td className="py-2 text-right">{money(p.line_total)}</td>
+                </tr>
+              ))}
+              <tr className="font-semibold">
+                <td className="py-2 pr-2" colSpan={4}>Products &amp; Services total</td>
+                <td className="py-2 text-right">
+                  {money(products.reduce((s, p) => s + (Number(p.line_total) || 0), 0))}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </>
+      )}
 
       {order.notes && (
         <div className="mt-6 text-sm">

@@ -186,7 +186,7 @@ export function generateOrderPdf(
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text("Supplies", margin, supplyY);
+    doc.text("Products & Services", margin, supplyY);
     supplyY += 4;
 
     const supplyBody = supplies.map((s) => [

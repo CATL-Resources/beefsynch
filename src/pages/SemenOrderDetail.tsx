@@ -1326,6 +1326,7 @@ const SemenOrderDetail = () => {
         items={items}
         customerName={customerName}
         fulfilledByBull={billableByBull}
+        products={supplyItems}
       />
 
       <NewOrderDialog
