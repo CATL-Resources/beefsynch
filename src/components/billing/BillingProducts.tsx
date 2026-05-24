@@ -185,18 +185,41 @@ export default function BillingProducts({ billingId, orgId, isEditing, onToggleE
           )}
         </td>
         <td className="px-3 py-2 text-right">
-          <Input
-            inputMode="decimal"
-            disabled={!isEditing}
-            className="h-7 w-14 text-right text-[15px] font-medium text-emerald-500 ml-auto"
-            defaultValue={l.units_billed ?? ""}
-            placeholder="—"
-            onBlur={(e) => {
-              const v = e.target.value === "" ? null : Number(e.target.value);
-              if (v === l.units_billed) return;
-              saveField(l, { units_billed: v });
-            }}
-          />
+          {(() => {
+            const hasQty = (l.units_billed ?? 0) > 0;
+            return (
+              <Input
+                inputMode="decimal"
+                disabled={!isEditing}
+                // When a quantity is set, the field reads as a settled value
+                // (no box) but is still click-to-edit; the box returns on focus
+                // and whenever the value is empty/zero.
+                className={`h-7 w-14 text-right ml-auto text-emerald-500 ${
+                  hasQty
+                    ? "border-transparent bg-transparent shadow-none text-[17px] font-semibold focus:border-input focus:bg-background"
+                    : "text-[15px] font-medium"
+                }`}
+                defaultValue={l.units_billed ?? ""}
+                placeholder="—"
+                onBlur={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  if (v === l.units_billed) return;
+                  const patch: Partial<ProductRow> = { units_billed: v };
+                  // Entering a quantity flips delivery off "Not Done": products
+                  // tied to a protocol event were administered by CATL, others
+                  // default to delivered. Clearing the qty resets to "Not Done".
+                  const curDelivery = l.delivery_method || "not_yet";
+                  if ((v ?? 0) > 0 && curDelivery === "not_yet") {
+                    const administered = l.protocol_event_label && l.protocol_event_label !== "—";
+                    patch.delivery_method = administered ? "catl_administered" : "delivered";
+                  } else if ((v ?? 0) <= 0 && curDelivery !== "not_yet") {
+                    patch.delivery_method = "not_yet";
+                  }
+                  saveField(l, patch);
+                }}
+              />
+            );
+          })()}
         </td>
         <td className="px-3 py-2 text-right">
           <Input
