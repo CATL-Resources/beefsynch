@@ -215,7 +215,6 @@ export default function PackOrderDialog({
         location_status: "out",
         nitrogen_status: "unknown",
         customer_id: orderCustomerId,
-        is_active: true,
       })
       .select("id")
       .single();
