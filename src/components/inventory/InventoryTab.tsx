@@ -187,6 +187,20 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
     },
   });
 
+  const { data: ownerCompanies = [] } = useQuery({
+    queryKey: ["semen_companies_can_own", orgId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("semen_companies")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .eq("can_own_inventory", true)
+        .order("name");
+      return data ?? [];
+    },
+    enabled: !!orgId,
+  });
+
 
 
 
@@ -432,6 +446,11 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
 
   const handleSaveEdit = async () => {
     if (!editRow) return;
+    if (!editForm.customer_id && !editForm.owner?.trim()) {
+      toast.error("Owner is required. Select a company or set a customer.");
+      setSavingEdit(false);
+      return;
+    }
     setSavingEdit(true);
     try {
       const updates: any = {
@@ -1281,13 +1300,27 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
                 </Select>
               </div>
               <div>
-                <Label className="text-xs font-medium text-muted-foreground">Owner</Label>
-                <Input
-                  className="mt-1"
-                  value={editForm.owner || ""}
-                  onChange={(e) => setEditForm((p: any) => ({ ...p, owner: e.target.value }))}
-                  placeholder="Optional"
-                />
+                <Label className="text-xs font-medium text-muted-foreground">Owner <span className="text-destructive">*</span></Label>
+                <div className={cn("mt-1 flex rounded-md overflow-hidden border border-border", editForm.customer_id && "opacity-50")}>
+                  {ownerCompanies.map((co) => (
+                    <button
+                      key={co.id}
+                      type="button"
+                      className={cn(
+                        "flex-1 px-3 py-2 text-sm font-medium transition-colors",
+                        editForm.owner === co.name
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted/30 text-muted-foreground hover:bg-muted/50"
+                      )}
+                      onClick={() => setEditForm((p: any) => ({ ...p, owner: co.name }))}
+                    >
+                      {co.name === "CATL Resources, PC" ? "CATL" : co.name === "Select Sires" ? "Select" : co.name}
+                    </button>
+                  ))}
+                </div>
+                {editForm.customer_id && (
+                  <p className="mt-1 text-xs text-muted-foreground">Customer-owned — owner derived from customer</p>
+                )}
               </div>
             </div>
 
