@@ -78,6 +78,8 @@ const newKey = () =>
     ? crypto.randomUUID()
     : `k-${Math.random().toString(36).slice(2)}-${Date.now()}`);
 
+const CUSTOMER_DELIVERY_VALUE = "__CUSTOMER_DELIVERY__";
+
 const tankDisplay = (t: { tank_name: string | null; tank_number: string } | null) => {
   if (!t) return "—";
   return t.tank_name ? `${t.tank_name} (#${t.tank_number})` : `Tank #${t.tank_number}`;
@@ -151,12 +153,88 @@ export default function PackOrderDialog({
   const [submitting, setSubmitting] = useState(false);
   const [fieldTanks, setFieldTanks] = useState<FieldTank[]>([]);
   const [selectedFieldTankId, setSelectedFieldTankId] = useState<string>("");
+  const [orderCustomerId, setOrderCustomerId] = useState<string | null>(null);
   const [bullSections, setBullSections] = useState<BullSection[]>([]);
   const [tankReturnExpected, setTankReturnExpected] = useState<boolean>(true);
   // Track whether the user has manually toggled the checkbox so we don't keep
   // overwriting it when they change tanks.
   const [returnToggled, setReturnToggled] = useState(false);
   const [notes, setNotes] = useState("");
+
+  const handleCustomerDelivery = async () => {
+    if (!orderCustomerId || !organizationId) return;
+
+    // Look for an existing delivery tank for this customer
+    const { data: existing } = await supabase
+      .from("tanks")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("customer_id", orderCustomerId)
+      .eq("tank_type", "customer_tank")
+      .limit(1)
+      .maybeSingle();
+
+    if (existing?.id) {
+      setSelectedFieldTankId(existing.id);
+      if (!returnToggled) {
+        setTankReturnExpected(false);
+      }
+      return;
+    }
+
+    // Create a new delivery tank for this customer
+    // Get customer name for the tank_name
+    const { data: custData } = await supabase
+      .from("customers")
+      .select("name")
+      .eq("id", orderCustomerId)
+      .maybeSingle();
+
+    const custName = custData?.name || "Customer";
+
+    // Get next available tank number
+    const { data: maxRow } = await supabase
+      .from("tanks")
+      .select("tank_number")
+      .eq("organization_id", organizationId)
+      .order("tank_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Parse highest tank number and increment. Fall back to 9100 if something goes wrong.
+    const maxNum = maxRow?.tank_number ? parseInt(maxRow.tank_number, 10) : 9000;
+    const nextNum = (isNaN(maxNum) ? 9000 : maxNum) + 1;
+
+    const { data: newTank, error } = await supabase
+      .from("tanks")
+      .insert({
+        organization_id: organizationId,
+        tank_name: custName,
+        tank_number: String(nextNum),
+        tank_type: "customer_tank",
+        location_status: "out",
+        nitrogen_status: "unknown",
+        customer_id: orderCustomerId,
+        is_active: true,
+      })
+      .select("id")
+      .single();
+
+    if (error || !newTank?.id) {
+      toast({
+        title: "Could not create delivery tank",
+        description: error?.message ?? "Unknown error",
+        variant: "destructive",
+      });
+      setSelectedFieldTankId("");
+      return;
+    }
+
+    setSelectedFieldTankId(newTank.id);
+    if (!returnToggled) {
+      setTankReturnExpected(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -210,6 +288,7 @@ export default function PackOrderDialog({
       setFieldTanks((tanksRes.data ?? []) as FieldTank[]);
 
       const customerId = (orderRes.data as { customer_id: string | null } | null)?.customer_id ?? null;
+      setOrderCustomerId(customerId);
       const items = (itemsRes.data ?? []) as unknown as OrderItem[];
 
       const sections: BullSection[] = [];
@@ -433,11 +512,23 @@ export default function PackOrderDialog({
             <Label htmlFor="field-tank">Field tank</Label>
             <select
               id="field-tank"
-              value={selectedFieldTankId}
-              onChange={(e) => setSelectedFieldTankId(e.target.value)}
+              value={selectedFieldTankId && !fieldTanks.find(t => t.id === selectedFieldTankId) ? CUSTOMER_DELIVERY_VALUE : selectedFieldTankId}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === CUSTOMER_DELIVERY_VALUE) {
+                  handleCustomerDelivery();
+                } else {
+                  setSelectedFieldTankId(val);
+                }
+              }}
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
               <option value="">Select a tank…</option>
+              {orderCustomerId && (
+                <option value={CUSTOMER_DELIVERY_VALUE}>
+                  📦 Customer Delivery — {customerName || "customer's tank"}
+                </option>
+              )}
               {fieldTanks.map((t) => (
                 <option key={t.id} value={t.id}>
                   {tankDisplay(t)} — {t.tank_type.replace(/_/g, " ")}
