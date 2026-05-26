@@ -59,8 +59,12 @@ const Billable = () => {
       .select(`
         id, order_date, invoicing_company_id,
         customers!semen_orders_customer_id_fkey(name),
-        semen_order_items(units, bull_catalog_id, custom_bull_name, bulls_catalog(bull_name, naab_code)),
-        product_order_items(quantity, product_name, line_total)
+        product_order_items(quantity, product_name, line_total),
+        tank_pack_orders(
+          tank_packs(
+            tank_pack_lines(units, is_billable, bull_name, bull_code, bull_catalog_id, bulls_catalog(bull_name, naab_code))
+          )
+        )
       `)
       .eq("organization_id", orgId)
       .eq("order_type", "customer")
@@ -68,16 +72,43 @@ const Billable = () => {
       .order("order_date", { ascending: true });
 
     const mappedOrders: BillableOrder[] = (orderRows ?? []).map((o: any) => {
-      const items = o.semen_order_items || [];
       const products = o.product_order_items || [];
-      const total = items.reduce((s: number, i: any) => s + (i.units || 0), 0);
-      const semenSummary = items
-        .map((i: any) => `${i.units} ${getBullDisplayLabel(i)}`)
+      // tank_pack_lines are the billing source of truth — bill for what was
+      // actually packed and sent, not what was originally ordered. is_billable
+      // false lines (customer-supplied) are excluded; null counts as billable.
+      const packLines: any[] = [];
+      for (const tpo of o.tank_pack_orders || []) {
+        const pack = tpo.tank_packs;
+        if (!pack) continue;
+        for (const l of pack.tank_pack_lines || []) {
+          if (l.is_billable === false) continue;
+          packLines.push(l);
+        }
+      }
+      const total = packLines.reduce((s: number, l: any) => s + (l.units || 0), 0);
+
+      // Group packed units by bull for the breakdown.
+      const byBull = new Map<string, { label: string; units: number }>();
+      for (const l of packLines) {
+        const key = l.bull_catalog_id || l.bull_name || "?";
+        const label = getBullDisplayLabel({
+          bull_catalog_id: l.bull_catalog_id,
+          custom_bull_name: l.bull_name,
+          bulls_catalog: l.bulls_catalog,
+        });
+        const cur = byBull.get(key) ?? { label, units: 0 };
+        cur.units += l.units || 0;
+        byBull.set(key, cur);
+      }
+      const semenSummary = Array.from(byBull.values())
+        .map((b) => `${b.units} ${b.label}`)
         .join(" + ");
       const productSummary = products
         .map((p: any) => `${p.quantity} ${p.product_name}`)
         .join(" + ");
-      const summary = [semenSummary, productSummary].filter(Boolean).join(" + ");
+      const summary = packLines.length === 0
+        ? [productSummary].filter(Boolean).join(" + ") || "Not yet packed"
+        : [semenSummary, productSummary].filter(Boolean).join(" + ");
       return {
         id: o.id,
         order_date: o.order_date,
