@@ -272,7 +272,7 @@ const PackDetail = () => {
       if (!pack?.organization_id) return [];
       const { data, error } = await supabase
         .from("tanks")
-        .select("id, tank_name, tank_number")
+        .select("id, tank_name, tank_number, location_status")
         .eq("organization_id", pack.organization_id)
         .order("tank_number", { ascending: true });
       if (error) throw error;
@@ -1345,6 +1345,7 @@ const PackDetail = () => {
                     </div>
                     <div className="max-h-60 overflow-y-auto">
                       {allSourceTanks
+                        .filter((t: any) => lineDialogMode === "edit" || t.location_status === "here")
                         .filter((t: any) => {
                           const q = lineSourceTankSearch.toLowerCase();
                           if (!q) return true;
@@ -1438,7 +1439,7 @@ const PackDetail = () => {
               {/* Units */}
               <div className="space-y-1.5">
                 <Label htmlFor="line-units">Units</Label>
-                <Input id="line-units" type="number" min="1" value={lineUnits} onChange={(e) => setLineUnits(e.target.value)} placeholder="e.g. 5" />
+                <Input id="line-units" type="text" inputMode="numeric" value={lineUnits} onChange={(e) => setLineUnits(e.target.value.replace(/[^0-9]/g, ""))} placeholder="e.g. 5" />
                 {lineSourceTankId && lineBullName && (() => {
                   const matched = sourceTankInventory.find((inv: any) => {
                     const n = inv.bulls_catalog?.bull_name || inv.custom_bull_name;
