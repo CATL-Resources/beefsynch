@@ -1,7 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Printer } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -18,18 +17,20 @@ type BillingRow = {
   status: string | null;
   notes: string | null;
   select_sires_invoice_number: string | null;
-  select_sires_invoice_status: string | null;
   catl_invoice_number: string | null;
-  catl_invoice_status: string | null;
 };
 
 const formatCurrency = (n: number) => `$${n.toFixed(2)}`;
 
-const STATUS_OPTIONS = [
-  { value: "unbilled", label: "Unbilled" },
-  { value: "sent", label: "Sent" },
-  { value: "paid", label: "Paid" },
-];
+// Invoice status is derived, not manually set: a company only needs an
+// invoice when it has billable dollars. With charges, the status is Invoiced
+// once an invoice number is entered, otherwise Unbilled. With no charges,
+// there's nothing to bill.
+function derivedInvoiceStatus(total: number, invoiceNumber: string | null) {
+  if (total <= 0) return { label: "No charges", className: "bg-muted text-muted-foreground" };
+  if (invoiceNumber && invoiceNumber.trim()) return { label: "Invoiced", className: "bg-emerald-500/15 text-emerald-500" };
+  return { label: "Unbilled", className: "bg-amber-500/15 text-amber-500" };
+}
 
 export default function BillingInvoices({ billingId, onPrintBillSummary, onCloseOut, currentStatus }: BillingInvoicesProps) {
   const queryClient = useQueryClient();
@@ -40,7 +41,7 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
     queryFn: async () => {
       const { data } = await supabase
         .from("project_billing")
-        .select("id, status, notes, select_sires_invoice_number, select_sires_invoice_status, catl_invoice_number, catl_invoice_status")
+        .select("id, status, notes, select_sires_invoice_number, catl_invoice_number")
         .eq("id", billingId)
         .maybeSingle();
       return data as BillingRow | null;
@@ -116,15 +117,10 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
           </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Status</label>
-            <Select
-              value={billing?.select_sires_invoice_status || "unbilled"}
-              onValueChange={(v) => saveField("select_sires_invoice_status", v)}
-            >
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {(() => {
+              const s = derivedInvoiceStatus(selectSemenTotal, billing?.select_sires_invoice_number ?? null);
+              return <div className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${s.className}`}>{s.label}</div>;
+            })()}
           </div>
         </div>
         <div className="rounded-lg border-l-4 border-amber-500 bg-muted/20 p-4 space-y-3">
@@ -148,15 +144,10 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
           </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Status</label>
-            <Select
-              value={billing?.catl_invoice_status || "unbilled"}
-              onValueChange={(v) => saveField("catl_invoice_status", v)}
-            >
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {(() => {
+              const s = derivedInvoiceStatus(productsTotal + catlSemenTotal, billing?.catl_invoice_number ?? null);
+              return <div className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${s.className}`}>{s.label}</div>;
+            })()}
           </div>
         </div>
       </div>
@@ -171,7 +162,7 @@ export default function BillingInvoices({ billingId, onPrintBillSummary, onClose
           </Button>
           {currentStatus !== "Invoiced" ? (
             <Button variant="destructive" size="sm" className="h-9" onClick={onCloseOut}>
-              Close out
+              Close Out
             </Button>
           ) : (
             <span className="text-sm text-purple-500 font-semibold">✓ Invoiced</span>

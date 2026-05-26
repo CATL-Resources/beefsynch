@@ -1206,7 +1206,7 @@ const ProjectBilling = () => {
                   className="h-9 bg-purple-600 hover:bg-purple-600/90 text-white"
                   onClick={() => setCloseOutOpen(true)}
                 >
-                  Mark Invoiced
+                  Close Out
                 </Button>
               )}
               {hasPack && (
@@ -1233,7 +1233,7 @@ const ProjectBilling = () => {
                   {hasPack && packStatus === "packed" && <DropdownMenuSeparator />}
                   {readyToBill && (
                     <DropdownMenuItem onClick={() => setCloseOutOpen(true)}>
-                      <CheckCircle className="h-4 w-4 mr-2" /> Close out
+                      <CheckCircle className="h-4 w-4 mr-2" /> Close Out
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onClick={() => setEditProjectOpen(true)}>
