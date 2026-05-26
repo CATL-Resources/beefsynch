@@ -37,6 +37,7 @@ interface BillableProject {
   customer_name: string;
   breeding_date: string | null;
   billing_id: string;
+  customer_supplied_tank: boolean;
 }
 
 const Billable = () => {
@@ -89,9 +90,9 @@ const Billable = () => {
     const { data: projRows } = await supabase
       .from("projects")
       .select(`
-        id, name, breeding_date, customer_id,
+        id, name, breeding_date, customer_id, customer_supplied_tank,
         customers!projects_customer_id_fkey(name),
-        project_billing(id, billing_completed_at, catl_invoice_number, select_sires_invoice_number)
+        project_billing(id, catl_invoice_status, select_sires_invoice_status)
       `)
       .eq("organization_id", orgId)
       .eq("status", "Ready to Bill");
@@ -100,17 +101,20 @@ const Billable = () => {
       .map((p: any) => {
         const billing = Array.isArray(p.project_billing) ? p.project_billing[0] : p.project_billing;
         if (!billing?.id) return null;
-        // Exclude already-invoiced projects so the Billable page and the Hub
-        // preview agree: a project is "ready to invoice" only when it hasn't
-        // been stamped complete and has no invoice number yet.
-        if (billing.billing_completed_at) return null;
-        if (billing.catl_invoice_number || billing.select_sires_invoice_number) return null;
+        // A project stays in "awaiting invoice" until its invoice statuses are
+        // no longer 'unbilled'. Stamping billing_completed_at does NOT remove
+        // it — the invoice status is the real gate.
+        const stillUnbilled =
+          billing.catl_invoice_status === "unbilled" ||
+          billing.select_sires_invoice_status === "unbilled";
+        if (!stillUnbilled) return null;
         return {
           id: p.id,
           name: p.name,
           customer_name: p.customers?.name || "Unknown",
           breeding_date: p.breeding_date,
           billing_id: billing.id,
+          customer_supplied_tank: !!p.customer_supplied_tank,
         } as BillableProject;
       })
       .filter((p): p is BillableProject => p !== null);
@@ -252,12 +256,19 @@ const Billable = () => {
                     {projects.map((p) => (
                       <div key={p.billing_id} className="flex items-center gap-3 px-4 py-3">
                         <div className="min-w-0 flex-1">
-                          <Link
-                            to={`/project/${p.id}/billing`}
-                            className="font-medium text-sm hover:text-primary truncate block"
-                          >
-                            {p.name}
-                          </Link>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Link
+                              to={`/project/${p.id}/billing`}
+                              className="font-medium text-sm hover:text-primary truncate"
+                            >
+                              {p.name}
+                            </Link>
+                            {p.customer_supplied_tank && (
+                              <Badge variant="outline" className="bg-teal-600/20 text-teal-400 border-teal-600/30 text-xs shrink-0">
+                                Customer Tank
+                              </Badge>
+                            )}
+                          </div>
                           <div className="text-xs text-muted-foreground truncate">
                             {p.customer_name}
                             {p.breeding_date && ` · Bred ${format(parseISO(p.breeding_date), "MMM d, yyyy")}`}

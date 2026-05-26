@@ -1137,6 +1137,11 @@ const ProjectBilling = () => {
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PROJECT_STATUS_COLORS[projectStatus] || "bg-muted text-muted-foreground"}`}>
                     {projectStatus}
                   </span>
+                  {project.customer_supplied_tank && (
+                    <Badge variant="outline" className="bg-teal-600/20 text-teal-400 border-teal-600/30 text-xs">
+                      Customer Tank
+                    </Badge>
+                  )}
                   {isInvoiced && (
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={revertInvoiced}>
                       Revert to Ready to Bill
