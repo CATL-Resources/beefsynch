@@ -43,6 +43,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const cowProtocols = [
   "Select Synch CIDR",
@@ -67,6 +68,7 @@ const formSchema = z.object({
   breeding_date: z.date({ required_error: "Breeding date is required" }),
   breeding_time: z.string().default("10:00"),
   status: z.enum(["Tentative", "Confirmed", "In Field", "Ready to Bill", "Invoiced"]).default("Tentative"),
+  customer_supplied_tank: z.boolean().default(false),
   notes: z.string().max(2000).optional(),
 });
 
@@ -89,6 +91,7 @@ interface EditProjectData {
   breeding_date: string | null;
   breeding_time: string | null;
   status: string;
+  customer_supplied_tank?: boolean | null;
   notes: string | null;
   last_contacted_date?: string | null;
   last_contacted_by?: string | null;
@@ -150,6 +153,7 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
       head_count: undefined as unknown as number,
       breeding_time: "10:00",
       status: "Tentative",
+      customer_supplied_tank: false,
       notes: "",
     },
   });
@@ -166,6 +170,7 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
         breeding_date: editData.breeding_date ? new Date(editData.breeding_date + "T12:00:00") : undefined,
         breeding_time: editData.breeding_time?.slice(0, 5) || "10:00",
         status: editData.status as "Tentative" | "Confirmed" | "In Field" | "Ready to Bill" | "Invoiced",
+        customer_supplied_tank: editData.customer_supplied_tank ?? false,
         notes: editData.notes || "",
       });
       setBulls(editData.bulls);
@@ -230,6 +235,7 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
         breeding_date: format(values.breeding_date, "yyyy-MM-dd"),
         breeding_time: values.breeding_time,
         status: values.status,
+        customer_supplied_tank: values.customer_supplied_tank,
         notes: values.notes || null,
         user_id: user.id,
       };
@@ -421,6 +427,21 @@ const NewProjectDialog = ({ open, onOpenChange, onProjectCreated, editData }: Ne
                 </FormItem>
               )} />
             </div>
+
+            {/* Customer-supplied tank */}
+            <FormField control={form.control} name="customer_supplied_tank" render={({ field }) => (
+              <FormItem className="flex flex-row items-start gap-3 rounded-lg border border-border p-3">
+                <FormControl>
+                  <Checkbox checked={field.value} onCheckedChange={field.onChange} className="mt-0.5" />
+                </FormControl>
+                <div className="space-y-0.5 leading-tight">
+                  <FormLabel className="cursor-pointer">Customer supplied tank</FormLabel>
+                  <p className="text-xs text-muted-foreground">
+                    Customer provided their own tank — no tank rental, and no pack/ship/unpack required to mark Ready to Bill.
+                  </p>
+                </div>
+              </FormItem>
+            )} />
 
             {/* Breeding Date & Time */}
             <div className="grid grid-cols-2 gap-4">

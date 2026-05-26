@@ -735,6 +735,11 @@ const ProjectDetail = () => {
             >
               {project.status}
             </Badge>
+            {(project as any).customer_supplied_tank && (
+              <Badge variant="outline" className="bg-teal-600/20 text-teal-400 border-teal-600/30">
+                Customer Tank
+              </Badge>
+            )}
             <span className="text-sm text-muted-foreground">
               {project.head_count} head
             </span>
@@ -1163,6 +1168,7 @@ const ProjectDetail = () => {
           breeding_date: project.breeding_date,
           breeding_time: project.breeding_time,
           status: project.status,
+          customer_supplied_tank: (project as any).customer_supplied_tank,
           notes: project.notes,
           last_contacted_date: project.last_contacted_date,
           last_contacted_by: project.last_contacted_by,

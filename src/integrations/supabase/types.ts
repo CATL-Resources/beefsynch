@@ -1802,6 +1802,7 @@ export type Database = {
           completed_at: string | null
           created_at: string
           customer_id: string
+          customer_supplied_tank: boolean
           head_count: number
           id: string
           last_contacted_by: string | null
@@ -1820,6 +1821,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           customer_id: string
+          customer_supplied_tank?: boolean
           head_count?: number
           id?: string
           last_contacted_by?: string | null
@@ -1838,6 +1840,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           customer_id?: string
+          customer_supplied_tank?: boolean
           head_count?: number
           id?: string
           last_contacted_by?: string | null
