@@ -164,30 +164,23 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
     queryClient.invalidateQueries({ queryKey: ["billing_invoice_semen_v2", billingId] });
   };
 
-  // One-shot auto-fill: once unpack populates session End values, push them
-  // into project_billing_semen.units_returned and recompute units_billable +
-  // line_total for any row the user clearly hasn't touched yet
-  // (units_returned still null or 0). Manual edits are preserved because we
-  // only write when units_returned is the default.
+  // One-shot seed: when a row's Returned is still empty (never touched), fill
+  // it from the unpack End value as a convenience. It NEVER overwrites a value
+  // the user has entered (only fires when units_returned is null/0), and it
+  // only writes units_returned — billable/line_total are display-derived and
+  // persisted on explicit edit, so we don't clobber the working document.
   const autoFillDone = useRef(false);
   useEffect(() => {
     if (autoFillDone.current) return;
     if (rows.length === 0 || suggestedReturnedByBull.size === 0) return;
 
-    const updates: Array<{ id: string; units_returned: number; units_billable: number; line_total: number }> = [];
+    const updates: Array<{ id: string; units_returned: number }> = [];
     for (const r of rows) {
       const k = r.bull_catalog_id || r.bull_name;
       const suggested = suggestedReturnedByBull.get(k);
       if (suggested == null) continue;
       if (r.units_returned !== 0 && r.units_returned !== null) continue; // user already edited
-      const packed = packedByBull.get(k) ?? r.units_packed ?? 0;
-      const blown = blownByBull.get(k) ?? r.units_blown ?? 0;
-      const returned = suggested;
-      const used = Math.max(0, packed - returned);
-      const billable = Math.max(0, used - blown);
-      const price = r.unit_price ?? 0;
-      const line_total = Number((billable * price).toFixed(2));
-      updates.push({ id: r.id, units_returned: returned, units_billable: billable, line_total });
+      updates.push({ id: r.id, units_returned: suggested });
     }
     if (updates.length === 0) return;
     autoFillDone.current = true;
@@ -195,16 +188,12 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
       updates.map((u) =>
         supabase
           .from("project_billing_semen")
-          .update({
-            units_returned: u.units_returned,
-            units_billable: u.units_billable,
-            line_total: u.line_total,
-          })
+          .update({ units_returned: u.units_returned })
           .eq("id", u.id),
       ),
     ).then(() => refetch());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, suggestedReturnedByBull, packedByBull, blownByBull]);
+  }, [rows, suggestedReturnedByBull]);
 
   // Billable pack lines rolled up by bull (is_billable=false = customer-
   // supplied, never billed). This is the billing source of truth.
@@ -278,8 +267,17 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
   const computeLineTotal = (billable: number | null, price: number | null) =>
     Number((Number(billable ?? 0) * Number(price ?? 0)).toFixed(2));
 
+  // Explicit user save. Recompute units_billable (Packed − Returned − Blown)
+  // and line_total from the merged values so an edit to Returned / Blown /
+  // Price persists the right billable + total. This only runs on a real user
+  // action — there is no load-time auto-write of these fields.
   const saveField = async (row: SemenRow, patch: Partial<SemenRow>) => {
     const next: any = { ...row, ...patch };
+    const k = next.bull_catalog_id || next.bull_name;
+    const packed = packedByBull.get(k) ?? next.units_packed ?? 0;
+    const blown = blownByBull.get(k) ?? next.units_blown ?? 0;
+    const returned = next.units_returned ?? 0;
+    next.units_billable = Math.max(0, packed - returned - blown);
     next.line_total = computeLineTotal(next.units_billable, next.unit_price);
     const { id, semen_companies, ...rest } = next;
     const { error } = await supabase
@@ -293,6 +291,35 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
     toast({ title: "Semen line saved" });
     refetch();
   };
+
+  // One-time backfill of invoicing_company_id from pack lines when a row has
+  // none. Set-once only — never overwrites a value already present (or one the
+  // user picked). Fixes legacy rows that show "Unknown".
+  const invBackfillDone = useRef(false);
+  useEffect(() => {
+    if (invBackfillDone.current) return;
+    if (rows.length === 0 || billablePackByBull.size === 0) return;
+    const updates: Array<{ id: string; invoicing_company_id: string }> = [];
+    for (const r of rows) {
+      if (r.invoicing_company_id) continue;
+      const k = r.bull_catalog_id || r.bull_name;
+      const packInfo = billablePackByBull.get(k);
+      if (packInfo && !packInfo.mixed && packInfo.invoicing_company_id) {
+        updates.push({ id: r.id, invoicing_company_id: packInfo.invoicing_company_id });
+      }
+    }
+    if (updates.length === 0) return;
+    invBackfillDone.current = true;
+    Promise.all(
+      updates.map((u) =>
+        supabase
+          .from("project_billing_semen")
+          .update({ invoicing_company_id: u.invoicing_company_id })
+          .eq("id", u.id),
+      ),
+    ).then(() => refetch());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, billablePackByBull]);
 
   // Derived per-row display values. Billable is ALWAYS computed from the
   // session-driven numbers per the business rule (Used − Blown), never read
@@ -314,28 +341,6 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
     const packDrift = packLineTotal != null && packLineTotal !== (r.units_packed ?? 0);
     return { row: r, packed, blown, returned, used, billable, lineTotal, packLineTotal, packDrift };
   });
-
-  // Keep the stored units_billable / units_blown / line_total in sync with the
-  // computed values so downstream readers (invoicing section, PDFs, subtotals
-  // persisted elsewhere) stay correct. Only writes when a row has drifted, so
-  // it settles in one pass and doesn't loop.
-  useEffect(() => {
-    const drifted = display.filter(({ row: r, blown, billable, lineTotal }) =>
-      (r.units_billable ?? 0) !== billable ||
-      (r.units_blown ?? 0) !== blown ||
-      (r.line_total ?? 0) !== lineTotal,
-    );
-    if (drifted.length === 0) return;
-    Promise.all(
-      drifted.map(({ row: r, blown, billable, lineTotal }) =>
-        supabase
-          .from("project_billing_semen")
-          .update({ units_billable: billable, units_blown: blown, line_total: lineTotal })
-          .eq("id", r.id),
-      ),
-    ).then(() => refetch());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [display]);
 
   // Subtotals by company — from the computed values.
   const subtotals = new Map<string, { billable: number; total: number }>();

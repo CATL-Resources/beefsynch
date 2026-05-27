@@ -471,53 +471,11 @@ const ProjectBilling = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  /* ── Auto-sync returned units when pack is unpacked ── */
-  const unpackSyncDone = useRef(false);
-  useEffect(() => {
-    if (!projectPacks.length || !semenLines.length) return;
-    const packStatus = projectPacks[0]?.status || null;
-    const isUnpacked = packStatus === "unpacked" || packStatus === "tank_returned";
-    if (isUnpacked && !unpackSyncDone.current) {
-      unpackSyncDone.current = true;
-      syncReturnedFromUnpack();
-    }
-  }, [projectPacks, semenLines]);
-
-  async function syncReturnedFromUnpack() {
-    const packIds = projectPacks.map((p) => p.id);
-    const { data: unpackLines } = await supabase
-      .from("tank_unpack_lines").select("bull_catalog_id, bull_name, units_returned")
-      .in("tank_pack_id", packIds);
-    if (!unpackLines?.length) return;
-
-    const returnedByBull: Record<string, number> = {};
-    for (const ul of unpackLines) {
-      const key = (ul.bull_catalog_id as string) || ul.bull_name;
-      returnedByBull[key] = (returnedByBull[key] || 0) + (ul.units_returned || 0);
-    }
-
-    const updates: Array<{ id: string; units_returned: number; units_billable: number; line_total: number }> = [];
-    const updated = semenLines.map((sl) => {
-      const key = sl.bull_catalog_id || sl.bull_name;
-      const returned = returnedByBull[key] ?? 0;
-      if (sl.units_returned !== returned) {
-        const used = (sl.units_packed ?? 0) - returned;
-        const billable = Math.max(0, used - (sl.units_blown ?? 0));
-        const line_total = billable * (sl.unit_price ?? 0);
-        if (sl.id) updates.push({ id: sl.id, units_returned: returned, units_billable: billable, line_total });
-        return { ...sl, units_returned: returned, units_billable: billable, line_total };
-      }
-      return sl;
-    });
-
-    if (updates.length === 0) return;
-    setSemenLines(updated);
-    await Promise.all(updates.map((u) =>
-      supabase.from("project_billing_semen").update({
-        units_returned: u.units_returned, units_billable: u.units_billable, line_total: u.line_total,
-      }).eq("id", u.id)
-    ));
-  }
+  // NOTE: returned units are NEVER auto-synced from unpack lines here. They're
+  // a user-entered field on the billing working document — the Billable
+  // summary seeds an empty Returned once from the unpack End, and after that
+  // only explicit edits change it. (A prior effect rewrote units_returned on
+  // every load, which silently reverted manual edits — removed.)
 
   /* ── Auto-sync units_packed on semen lines from pack data ── */
   const packedSyncDone = useRef(false);
@@ -546,20 +504,17 @@ const ProjectBilling = () => {
       packedByBull[key] = (packedByBull[key] || 0) + pl.units;
     }
 
-    const dbUpdates: Array<{ id: string; units_packed: number; units_billable: number; line_total: number }> = [];
+    // units_packed is the ONLY field that may auto-sync from pack data. We do
+    // NOT recompute or write units_billable / line_total / units_returned here
+    // — those belong to the user's working document and are only changed by
+    // explicit edits in the Billable summary.
+    const dbUpdates: Array<{ id: string; units_packed: number }> = [];
     const updated = semenLines.map((sl) => {
       const key = sl.bull_catalog_id || sl.bull_name;
       const packed = packedByBull[key] ?? 0;
       if (packed > 0 && sl.units_packed !== packed && sl.id) {
-        // Only touch units_packed and recompute the billable/total from it.
-        // units_returned is owned by the unpack flow (or manual edits) —
-        // never recalculate it from packed minus used or we wipe out the
-        // real returned count.
-        const returned = sl.units_returned ?? 0;
-        const billable = Math.max(0, packed - returned - (sl.units_blown ?? 0));
-        const line_total = billable * (sl.unit_price ?? 0);
-        dbUpdates.push({ id: sl.id, units_packed: packed, units_billable: billable, line_total });
-        return { ...sl, units_packed: packed, units_billable: billable, line_total };
+        dbUpdates.push({ id: sl.id, units_packed: packed });
+        return { ...sl, units_packed: packed };
       }
       return sl;
     });
@@ -569,8 +524,6 @@ const ProjectBilling = () => {
     await Promise.all(dbUpdates.map((u) =>
       supabase.from("project_billing_semen").update({
         units_packed: u.units_packed,
-        units_billable: u.units_billable,
-        line_total: u.line_total,
       }).eq("id", u.id)
     ));
   }
