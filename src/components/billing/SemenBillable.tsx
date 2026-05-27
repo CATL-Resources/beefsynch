@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
@@ -45,6 +46,7 @@ type PackLineRow = {
   bull_code: string | null;
   units: number;
   invoicing_company_id: string | null;
+  is_billable: boolean | null;
 };
 
 const formatCurrency = (n: number | null | undefined) =>
@@ -88,7 +90,7 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
       if (ids.length === 0) return [];
       const { data, error } = await supabase
         .from("tank_pack_lines")
-        .select("bull_catalog_id, bull_name, bull_code, units, invoicing_company_id")
+        .select("bull_catalog_id, bull_name, bull_code, units, invoicing_company_id, is_billable")
         .in("tank_pack_id", ids);
       if (error) throw error;
       return (data ?? []) as PackLineRow[];
@@ -204,18 +206,19 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, suggestedReturnedByBull, packedByBull, blownByBull]);
 
-  // Auto-create semen rows once when pack lines exist but no semen rows do.
-  useEffect(() => {
-    if (rows.length > 0 || packLines.length === 0) return;
-    const byBull = new Map<string, { bull_name: string; bull_code: string | null; bull_catalog_id: string | null; units: number; invoicing_company_id: string | null; mixed: boolean }>();
+  // Billable pack lines rolled up by bull (is_billable=false = customer-
+  // supplied, never billed). This is the billing source of truth.
+  const billablePackByBull = useMemo(() => {
+    const m = new Map<string, { bull_name: string; bull_code: string | null; bull_catalog_id: string | null; units: number; invoicing_company_id: string | null; mixed: boolean }>();
     for (const pl of packLines) {
+      if (pl.is_billable === false) continue;
       const k = pl.bull_catalog_id || pl.bull_name;
-      const entry = byBull.get(k);
+      const entry = m.get(k);
       if (entry) {
         entry.units += pl.units ?? 0;
         if (entry.invoicing_company_id !== pl.invoicing_company_id) entry.mixed = true;
       } else {
-        byBull.set(k, {
+        m.set(k, {
           bull_name: pl.bull_name,
           bull_code: pl.bull_code,
           bull_catalog_id: pl.bull_catalog_id,
@@ -225,7 +228,23 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
         });
       }
     }
-    const inserts = Array.from(byBull.values()).map((b, i) => ({
+    return m;
+  }, [packLines]);
+
+  // Auto-create ANY missing billing semen rows — not just on first generation.
+  // When a pack line is added to an already-billed project, its bull shows up
+  // here automatically. Only ADDS rows (keyed by bull); never touches existing
+  // rows' prices / returned / blown. Guarded so it inserts each bull once.
+  const insertedKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (billablePackByBull.size === 0) return;
+    const existing = new Set(rows.map((r) => r.bull_catalog_id || r.bull_name));
+    const missing = Array.from(billablePackByBull.entries())
+      .filter(([k]) => !existing.has(k) && !insertedKeysRef.current.has(k));
+    if (missing.length === 0) return;
+    for (const [k] of missing) insertedKeysRef.current.add(k);
+    const baseSort = rows.length;
+    const inserts = missing.map(([, b], i) => ({
       billing_id: billingId,
       bull_catalog_id: b.bull_catalog_id,
       bull_name: b.bull_name,
@@ -236,12 +255,25 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
       units_billable: b.units,
       unit_price: 0,
       line_total: 0,
-      sort_order: i,
+      sort_order: baseSort + i,
       invoicing_company_id: b.mixed ? null : b.invoicing_company_id,
     }));
-    if (inserts.length === 0) return;
-    supabase.from("project_billing_semen").insert(inserts).then(() => refetch());
-  }, [rows.length, packLines, billingId]);
+    supabase.from("project_billing_semen").insert(inserts).then(({ error }) => {
+      if (error) {
+        // Allow a retry if the insert failed.
+        for (const [k] of missing) insertedKeysRef.current.delete(k);
+        return;
+      }
+      const names = missing.map(([, b]) => b.bull_code ? `${b.bull_name} (${b.bull_code})` : b.bull_name);
+      toast({
+        title: names.length === 1
+          ? `Added ${names[0]} to billing`
+          : `Added ${names.length} bulls to billing`,
+        description: "Verify units and pricing.",
+      });
+      refetch();
+    });
+  }, [billablePackByBull, rows, billingId]);
 
   const computeLineTotal = (billable: number | null, price: number | null) =>
     Number((Number(billable ?? 0) * Number(price ?? 0)).toFixed(2));
@@ -275,7 +307,12 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
     const used = Math.max(0, packed - returned);
     const billable = Math.max(0, used - blown);
     const lineTotal = Number((billable * (r.unit_price ?? 0)).toFixed(2));
-    return { row: r, packed, blown, returned, used, billable, lineTotal };
+    // Drift: the billable pack-line total no longer matches the stored
+    // units_packed (more was packed later via add_pack_line). Flag it; the
+    // user decides whether to update — we never silently overwrite.
+    const packLineTotal = billablePackByBull.get(k)?.units ?? null;
+    const packDrift = packLineTotal != null && packLineTotal !== (r.units_packed ?? 0);
+    return { row: r, packed, blown, returned, used, billable, lineTotal, packLineTotal, packDrift };
   });
 
   // Keep the stored units_billable / units_blown / line_total in sync with the
@@ -332,11 +369,21 @@ export default function SemenBillable({ billingId, projectId, isEditing, onToggl
           <tbody>
             {display.length === 0 ? (
               <tr><td colSpan={10} className="px-3 py-4 text-center text-muted-foreground">No semen lines yet.</td></tr>
-            ) : display.map(({ row: r, packed, blown, returned, used, billable, lineTotal }) => (
+            ) : display.map(({ row: r, packed, blown, returned, used, billable, lineTotal, packLineTotal, packDrift }) => (
               <tr key={r.id} className="border-t border-border/40">
                 <td className="px-3 py-2 font-medium truncate">{r.bull_name}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{r.bull_code || "—"}</td>
-                <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">{packed}</td>
+                <td className="px-3 py-2 text-right italic text-muted-foreground tabular-nums">
+                  {packed}
+                  {packDrift && (
+                    <span
+                      className="ml-1 inline-flex items-center text-amber-500 not-italic"
+                      title={`Pack shows ${packLineTotal} units, billing shows ${r.units_packed ?? 0}. Update if needed.`}
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-right">
                   {(() => {
                     const k = r.bull_catalog_id || r.bull_name;
