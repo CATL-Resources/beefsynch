@@ -95,7 +95,7 @@ export default function UnpackFromProjectDialog({
         billingId
           ? supabase
               .from("project_billing_session_inventory")
-              .select("bull_catalog_id, start_units, end_units, session_id, project_billing_sessions!inner(sort_order, session_date)")
+              .select("bull_catalog_id, canister, start_units, end_units, session_id, project_billing_sessions!inner(sort_order, session_date)")
               .eq("billing_id", billingId)
           : Promise.resolve({ data: [] as any[], error: null }),
       ]);
@@ -120,17 +120,21 @@ export default function UnpackFromProjectDialog({
         if (extras) augmented = [...destTanks, ...(extras as TankOption[])];
       }
 
-      // Remaining = the last session's End value for that bull. Summing
-      // (start - end) across sessions double-counts whenever sessions don't
-      // chain cleanly (a PM session that re-starts from the packed value
-      // instead of the previous End). Treating NULL end_units as 0 also
-      // marked incomplete sessions as 100% used.
+      // Build a per-(bull, canister) end-of-latest-session map. A bull packed
+      // across multiple field canisters has one End value per canister, so we
+      // can't roll up by bull alone. Match each pack line to its own canister's
+      // session row directly — the remaining for that pack line is that row's
+      // End. (The old per-bull rollup discarded all but the first canister's
+      // End, reporting 0 remaining when leftover units lived in another can.)
       const usedRows = (usedRes.data ?? []) as Array<{
         bull_catalog_id: string | null;
+        canister: string | null;
         end_units: number | null;
         project_billing_sessions?: { sort_order: number | null; session_date: string | null } | null;
       }>;
-      const lastEndByBull = new Map<string, number>();
+      const canisterKey = (bullId: string | null, canister: string | null) =>
+        `${bullId ?? ""}::${canister ?? ""}`;
+      const lastEndByCanister = new Map<string, number>();
       const sorted = usedRows
         .filter((r) => r.bull_catalog_id && r.end_units != null)
         .slice()
@@ -143,30 +147,18 @@ export default function UnpackFromProjectDialog({
           return bDate.localeCompare(aDate);
         });
       for (const r of sorted) {
-        if (!r.bull_catalog_id) continue;
-        if (!lastEndByBull.has(r.bull_catalog_id)) {
-          lastEndByBull.set(r.bull_catalog_id, r.end_units ?? 0);
+        const key = canisterKey(r.bull_catalog_id, r.canister);
+        if (!lastEndByCanister.has(key)) {
+          lastEndByCanister.set(key, r.end_units ?? 0);
         }
       }
 
-      // Roll up packed totals per bull so split pulls can divvy the
-      // remaining proportionally.
-      const packedByBull = new Map<string, number>();
-      for (const l of lines) {
-        if (!l.bull_catalog_id) continue;
-        packedByBull.set(l.bull_catalog_id, (packedByBull.get(l.bull_catalog_id) ?? 0) + (l.units ?? 0));
-      }
-
       const rows: ReturnRow[] = lines.map((l) => {
-        const totalPacked = l.bull_catalog_id ? packedByBull.get(l.bull_catalog_id) ?? 0 : (l.units ?? 0);
-        const lastEnd = l.bull_catalog_id ? lastEndByBull.get(l.bull_catalog_id) : undefined;
-        // Proportional share of the bull's remaining for this specific pack
-        // line. If no session has reported End yet, all of it is still here.
-        const remaining = lastEnd == null
-          ? (l.units ?? 0)
-          : totalPacked > 0
-            ? Math.round((lastEnd * (l.units ?? 0)) / totalPacked)
-            : (l.units ?? 0);
+        const key = canisterKey(l.bull_catalog_id, l.field_canister);
+        const lastEnd = lastEndByCanister.get(key);
+        // If no session has reported End yet for this canister, all packed
+        // units are still here.
+        const remaining = lastEnd == null ? (l.units ?? 0) : lastEnd;
         return {
           packLineId: l.id,
           bullCatalogId: l.bull_catalog_id,
