@@ -129,6 +129,10 @@ export default function CloseOutReviewDialog({
   // in the Invoicing section.
   const [selectInv, setSelectInv] = useState("");
   const [catlInv, setCatlInv] = useState("");
+  const [forceOverride, setForceOverride] = useState(false);
+  useEffect(() => {
+    if (!open) setForceOverride(false);
+  }, [open]);
   useEffect(() => {
     if (data) {
       setSelectInv(data.selectInvoiceNumber ?? "");
@@ -147,6 +151,25 @@ export default function CloseOutReviewDialog({
   const catlTotal = catlSemen + productsTotal;
 
   const handleCloseOut = async () => {
+    // Record the override in notes BEFORE other writes so the audit trail
+    // captures who/what was bypassed even if the close path errors later.
+    if (isOverridingCritical) {
+      const issueList = critical.map((c) => `• ${c.message}`).join("\n");
+      const overrideNote = `[Force-closed ${new Date().toISOString().slice(0, 10)}]\nBypassed checks:\n${issueList}`;
+      const { data: existing } = await supabase
+        .from("project_billing")
+        .select("notes")
+        .eq("id", billingId)
+        .single();
+      const newNotes = existing?.notes
+        ? `${existing.notes}\n\n${overrideNote}`
+        : overrideNote;
+      await supabase
+        .from("project_billing")
+        .update({ notes: newNotes })
+        .eq("id", billingId);
+    }
+
     // Persist any invoice numbers entered here before finalizing.
     const patch: Record<string, string | null> = {};
     if (selectTotal > 0) patch.select_sires_invoice_number = selectInv.trim() || null;
@@ -193,21 +216,32 @@ export default function CloseOutReviewDialog({
       warn.push({ kind: "warn", message: "No Arm Service line found" });
     } else {
       const arm = productLines[armIdx];
-      if (!arm.doses || arm.doses <= 0) {
+      // Arm Service head count lives in `doses` for auto-calculated rows and
+      // in `units_billed` when the user has overridden the count (typical for
+      // CATL-administered service). Prefer whichever is present and positive.
+      const effectiveHead =
+        (arm.doses && arm.doses > 0)
+          ? arm.doses
+          : (arm.units_billed && arm.units_billed > 0)
+            ? arm.units_billed
+            : 0;
+
+      if (effectiveHead <= 0) {
         crit.push({ kind: "fail", message: "Arm Service has no head count" });
       } else if (!arm.unit_price || arm.unit_price <= 0) {
         crit.push({ kind: "fail", message: "Arm Service has no price" });
       } else {
         ok.push({
           kind: "ok",
-          message: `Arm Service: ${arm.doses} head × $${arm.unit_price.toFixed(2)} = $${(arm.line_total ?? 0).toFixed(2)}`,
+          message: `Arm Service: ${effectiveHead} head × $${arm.unit_price.toFixed(2)} = $${(arm.line_total ?? 0).toFixed(2)}`,
         });
       }
+
       const totalHead = sessions.reduce((s, x) => s + (x.head_count ?? 0), 0);
-      if (totalHead > 0 && arm.doses != null && Math.abs((arm.doses ?? 0) - totalHead) > 0) {
+      if (totalHead > 0 && effectiveHead > 0 && Math.abs(effectiveHead - totalHead) > 0) {
         warn.push({
           kind: "warn",
-          message: `Arm Service qty (${arm.doses}) doesn't match total session head (${totalHead})`,
+          message: `Arm Service qty (${effectiveHead}) doesn't match total session head (${totalHead})`,
         });
       }
     }
@@ -290,7 +324,8 @@ export default function CloseOutReviewDialog({
     return { critical: crit, warnings: warn, oks: ok };
   }, [data]);
 
-  const canProceed = !isLoading && critical.length === 0;
+  const canProceed = !isLoading && (critical.length === 0 || forceOverride);
+  const isOverridingCritical = critical.length > 0 && forceOverride;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -340,6 +375,23 @@ export default function CloseOutReviewDialog({
           </div>
         )}
 
+        {!isLoading && critical.length > 0 && (
+          <label className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={forceOverride}
+              onChange={(e) => setForceOverride(e.target.checked)}
+              className="mt-0.5 shrink-0"
+            />
+            <span className="text-foreground">
+              <span className="font-medium">Override checks and close anyway.</span>
+              <span className="block text-muted-foreground mt-0.5">
+                I've reviewed the issues above and want to close this project out regardless.
+              </span>
+            </span>
+          </label>
+        )}
+
         {!isLoading && canProceed && (selectTotal > 0 || catlTotal > 0) && (
           <div className="space-y-2">
             <div className="text-xs font-medium text-muted-foreground">Invoice number (optional)</div>
@@ -372,10 +424,18 @@ export default function CloseOutReviewDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             disabled={!canProceed}
-            className="bg-purple-600 hover:bg-purple-600/90 text-white"
+            className={
+              isOverridingCritical
+                ? "bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                : "bg-purple-600 hover:bg-purple-600/90 text-white"
+            }
             onClick={handleCloseOut}
           >
-            {canProceed ? "Close Out" : "Fix issues to continue"}
+            {!canProceed
+              ? "Fix issues to continue"
+              : isOverridingCritical
+                ? "Force Close Out"
+                : "Close Out"}
           </Button>
         </DialogFooter>
       </DialogContent>
