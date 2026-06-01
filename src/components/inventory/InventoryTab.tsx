@@ -275,7 +275,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
       }
 
       const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
-      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered"]);
+      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered", "invoiced"]);
       for (const r of (ordRes.data ?? []) as any[]) {
         if (TERMINAL_ITEM.has(r.item_status)) continue;
         const fs = r.semen_orders?.fulfillment_status;
@@ -327,7 +327,7 @@ const InventoryTab = ({ orgId, initialOwnerFilter = "company", onFilterReset }: 
         return s !== "Ready to Bill" && s !== "Invoiced";
       });
       const TERMINAL_ITEM = new Set(["cancelled", "fulfilled", "received"]);
-      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered"]);
+      const TERMINAL_ORDER = new Set(["cancelled", "fulfilled", "delivered", "invoiced"]);
       const allOpenOrders = (ordRes.data ?? []).filter((r: any) =>
         !TERMINAL_ITEM.has(r.item_status) && !TERMINAL_ORDER.has(r.semen_orders?.fulfillment_status),
       );
