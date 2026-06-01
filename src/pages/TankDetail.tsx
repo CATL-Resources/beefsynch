@@ -482,6 +482,20 @@ const TankDetail = () => {
 
   const [inventorySearch, setInventorySearch] = useState("");
 
+  const matchesInventorySearch = (row: any, q: string) => {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    const haystack = [
+      row.bulls_catalog?.bull_name,
+      row.bulls_catalog?.naab_code,
+      row.bull_code,
+      row.custom_bull_name,
+    ]
+      .filter(Boolean)
+      .map((v: string) => v.toLowerCase());
+    return haystack.some((s) => s.includes(needle));
+  };
+
   // Grouped inventory by customer for communal tanks
   const isCommunal = tank?.tank_type === "communal_tank";
   const inventoryByCustomer = useMemo(() => {
@@ -498,20 +512,6 @@ const TankDetail = () => {
     }
     return Array.from(map.values());
   }, [inventory, isCommunal, inventorySearch]);
-
-  const matchesInventorySearch = (row: any, q: string) => {
-    if (!q) return true;
-    const needle = q.toLowerCase();
-    const haystack = [
-      row.bulls_catalog?.bull_name,
-      row.bulls_catalog?.naab_code,
-      row.bull_code,
-      row.custom_bull_name,
-    ]
-      .filter(Boolean)
-      .map((v: string) => v.toLowerCase());
-    return haystack.some((s) => s.includes(needle));
-  };
 
   const activeRows = useMemo(
     () => inventory.filter((r: any) => (r.units ?? 0) > 0 && matchesInventorySearch(r, inventorySearch)),
