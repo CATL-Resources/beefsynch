@@ -85,7 +85,7 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
   const [showFulfillmentOverride, setShowFulfillmentOverride] = useState(false);
 
   // Supplies state
-  const [supplyLines, setSupplyLines] = useState<{ productId: string; productName: string; quantity: number | ""; unitPrice: number; unitLabel: string; lineTotal: number }[]>([]);
+  const [supplyLines, setSupplyLines] = useState<{ productId: string; productName: string; quantity: number | string; unitPrice: number; unitLabel: string; lineTotal: number }[]>([]);
   const [supplyProducts, setSupplyProducts] = useState<{ id: string; product_name: string; product_category: string; default_price: number; unit_label: string }[]>([]);
 
   // Semen company state
@@ -297,10 +297,10 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
           .eq("semen_order_id", orderId);
         if (delSupErr) throw delSupErr;
       }
-      const validSupplies = supplyLines.filter((s) => s.productName.trim() && s.quantity);
+      const validSupplies = supplyLines.filter((s) => s.productName.trim() && Number(s.quantity) > 0);
       if (validSupplies.length > 0) {
         const supplyRows = validSupplies.map((s) => {
-          const qty = typeof s.quantity === "number" ? s.quantity : parseInt(String(s.quantity)) || 0;
+          const qty = typeof s.quantity === "number" ? s.quantity : parseFloat(String(s.quantity)) || 0;
           return {
             semen_order_id: orderId,
             billing_product_id: s.productId || null,
@@ -732,15 +732,18 @@ const NewOrderDialog = ({ open, onOpenChange, editData, initialOrderType, initia
                     </SelectContent>
                   </Select>
                   <Input
-                    inputMode="numeric"
+                    inputMode="decimal"
                     className="w-[80px]"
                     placeholder="Qty"
                     value={line.quantity === "" ? "" : String(line.quantity)}
                     onChange={(e) => {
-                      const raw = e.target.value.replace(/[^0-9]/g, "");
+                      // allow digits and a single decimal point; keep raw text
+                      const cleaned = e.target.value.replace(/[^0-9.]/g, "");
+                      const parts = cleaned.split(".");
+                      const next = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : cleaned;
                       setSupplyLines((prev) =>
                         prev.map((s, i) =>
-                          i === idx ? { ...s, quantity: raw === "" ? "" : parseInt(raw) || 0 } : s,
+                          i === idx ? { ...s, quantity: next } : s,
                         ),
                       );
                     }}

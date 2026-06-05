@@ -195,7 +195,7 @@ export default function ProductOrderItemsSection({ orderId, orgId }: ProductOrde
                 <td className="px-3 py-2 font-medium truncate">{i.product_name}</td>
                 <td className="px-3 py-2 text-right">
                   <Input
-                    inputMode="numeric"
+                    inputMode="decimal"
                     className="h-7 w-[60px] text-right text-xs ml-auto"
                     defaultValue={i.quantity}
                     onBlur={(e) => {
@@ -288,10 +288,15 @@ export default function ProductOrderItemsSection({ orderId, orgId }: ProductOrde
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Qty</Label>
               <Input
-                inputMode="numeric"
+                inputMode="decimal"
                 placeholder={selectedCatalog?.unit_label || "qty"}
                 value={addQty}
-                onChange={(e) => setAddQty(e.target.value.replace(/[^0-9]/g, ""))}
+                onChange={(e) => {
+                  // allow digits and a single decimal point
+                  const cleaned = e.target.value.replace(/[^0-9.]/g, "");
+                  const parts = cleaned.split(".");
+                  setAddQty(parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : cleaned);
+                }}
                 className="h-9 text-sm"
               />
             </div>
