@@ -285,6 +285,23 @@ const ReceiveShipment = () => {
     enabled: !!orgId,
   });
 
+  // Companies (Select, CATL/Cava) own inventory; they are NOT customers. A
+  // customer record that shares an inventory-owning company's name is a
+  // mis-entry (e.g. a "Select Sires" customer vs the Select Sires company) and
+  // must never be picked as a semen owner — that books company stock to a fake
+  // customer and hides it from saleable inventory. Records flagged "DO NOT USE"
+  // are hidden too.
+  const selectableCustomers = useMemo(() => {
+    const companyNames = new Set(
+      (inventoryOwnerCompanies ?? []).map((c) => (c.name ?? "").trim().toLowerCase()),
+    );
+    return (customers ?? []).filter(
+      (c: any) =>
+        !companyNames.has((c.name ?? "").trim().toLowerCase()) &&
+        !/do not use/i.test(c.name ?? ""),
+    );
+  }, [customers, inventoryOwnerCompanies]);
+
   // Build stable list of bull keys for existing-inventory lookup
   const bullKeysForQuery = useMemo(() => {
     const keys = new Set<string>();
@@ -1472,7 +1489,7 @@ const ReceiveShipment = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none">No owner (customer-supplied)</SelectItem>
-                      {customers.map((c) => (
+                      {selectableCustomers.map((c) => (
                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                       ))}
                     </SelectContent>

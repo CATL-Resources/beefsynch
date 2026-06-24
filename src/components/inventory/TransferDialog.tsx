@@ -143,6 +143,7 @@ export default function TransferDialog({
   const [receiveAddUnits, setReceiveAddUnits] = useState<string>("");
   const [receiveSameLocation, setReceiveSameLocation] = useState<boolean>(true);
   const [receiveOwnerCompanyId, setReceiveOwnerCompanyId] = useState<string>("");
+  const [receiveOriginCompanyId, setReceiveOriginCompanyId] = useState<string>("");
   const [receiveSourceNote, setReceiveSourceNote] = useState<string>("");
 
   const bullName = getBullDisplayName(sourceRow);
@@ -175,6 +176,7 @@ export default function TransferDialog({
       setReceiveAddUnits("");
       setReceiveSameLocation(true);
       setReceiveOwnerCompanyId(sourceRow.owner_company_id || "");
+      setReceiveOriginCompanyId((sourceRow as any).origin_company_id || "");
       setReceiveSourceNote("");
     }
   }, [open, sourceRow, defaultCustomerId, initialMode]);
@@ -223,7 +225,7 @@ export default function TransferDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("semen_companies")
-        .select("id, name")
+        .select("id, name, can_own_inventory")
         .eq("organization_id", orgId!)
         .order("name");
       if (error) throw error;
@@ -444,6 +446,7 @@ export default function TransferDialog({
                 custom_bull_name: sourceRow.custom_bull_name || null,
                 bull_code: resolvedBullCode,
                 owner_company_id: receiveOwnerCompanyId || null,
+                origin_company_id: receiveOriginCompanyId || null,
                 customer_id: destCustomerId,
               })
               .select("id")
@@ -766,6 +769,27 @@ export default function TransferDialog({
                 )}
 
                 <div>
+                  <Label>Origin / ordered from</Label>
+                  <Select
+                    value={receiveOriginCompanyId || "__none__"}
+                    onValueChange={(v) => setReceiveOriginCompanyId(v === "__none__" ? "" : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Unknown / not specified" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Unknown / not specified</SelectItem>
+                      {semenCompanies.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Where this semen was ordered from (provenance only — this does not set ownership).
+                  </p>
+                </div>
+
+                <div>
                   <Label>Owner company</Label>
                   <Select
                     value={receiveOwnerCompanyId || "__none__"}
@@ -776,11 +800,14 @@ export default function TransferDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">None</SelectItem>
-                      {semenCompanies.map((c) => (
+                      {semenCompanies.filter((c) => c.can_own_inventory).map((c) => (
                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Only CATL or Select can own company stock. For customer-owned semen, leave this and use “Assign to customer” below.
+                  </p>
                 </div>
 
                 <div>

@@ -2561,6 +2561,7 @@ export type Database = {
           item_type: string
           notes: string | null
           organization_id: string
+          origin_company_id: string | null
           owner: string | null
           owner_company_id: string | null
           owner_customer_id: string | null
@@ -2584,6 +2585,7 @@ export type Database = {
           item_type?: string
           notes?: string | null
           organization_id: string
+          origin_company_id?: string | null
           owner?: string | null
           owner_company_id?: string | null
           owner_customer_id?: string | null
@@ -2607,6 +2609,7 @@ export type Database = {
           item_type?: string
           notes?: string | null
           organization_id?: string
+          origin_company_id?: string | null
           owner?: string | null
           owner_company_id?: string | null
           owner_customer_id?: string | null
@@ -2644,6 +2647,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tank_inventory_origin_company_id_fkey"
+            columns: ["origin_company_id"]
+            isOneToOne: false
+            referencedRelation: "semen_companies"
             referencedColumns: ["id"]
           },
           {

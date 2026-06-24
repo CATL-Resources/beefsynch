@@ -1322,6 +1322,7 @@ const SemenOrderDetail = () => {
           semenCompanyId={order.semen_company_id}
           semenCompanyName={companyName}
           customerId={order.customer_id}
+          inventoryOwner={(order as any).inventory_owner ?? null}
           items={items.map((i) => ({
             id: i.id,
             units: i.units,

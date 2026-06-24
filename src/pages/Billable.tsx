@@ -71,6 +71,24 @@ const Billable = () => {
       .eq("status", "fulfilled")
       .order("order_date", { ascending: true });
 
+    // Direct-sale units (sold straight from a tank with no pack) are billable but
+    // have no tank_pack_lines, so they'd otherwise show as 0 / "Not yet packed".
+    // Pull them from the ledger and fold them into each order's billable total.
+    const orderIdList = (orderRows ?? []).map((o: any) => o.id);
+    const directByOrder = new Map<string, number>();
+    if (orderIdList.length > 0) {
+      const { data: dsTxns } = await supabase
+        .from("inventory_transactions")
+        .select("order_id, units_change")
+        .in("order_id", orderIdList)
+        .eq("transaction_type", "direct_sale")
+        .eq("is_billable", true);
+      for (const t of (dsTxns ?? []) as any[]) {
+        if (!t.order_id) continue;
+        directByOrder.set(t.order_id, (directByOrder.get(t.order_id) ?? 0) + Math.abs(t.units_change || 0));
+      }
+    }
+
     const mappedOrders: BillableOrder[] = (orderRows ?? []).map((o: any) => {
       const products = o.product_order_items || [];
       // tank_pack_lines are the billing source of truth — bill for what was
@@ -85,7 +103,8 @@ const Billable = () => {
           packLines.push(l);
         }
       }
-      const total = packLines.reduce((s: number, l: any) => s + (l.units || 0), 0);
+      const directUnits = directByOrder.get(o.id) ?? 0;
+      const total = packLines.reduce((s: number, l: any) => s + (l.units || 0), 0) + directUnits;
 
       // Group packed units by bull for the breakdown.
       const byBull = new Map<string, { label: string; units: number }>();
@@ -106,9 +125,10 @@ const Billable = () => {
       const productSummary = products
         .map((p: any) => `${p.quantity} ${p.product_name}`)
         .join(" + ");
+      const directSummary = directUnits > 0 ? `${directUnits} units (direct sale)` : "";
       const summary = packLines.length === 0
-        ? [productSummary].filter(Boolean).join(" + ") || "Not yet packed"
-        : [semenSummary, productSummary].filter(Boolean).join(" + ");
+        ? [directSummary, productSummary].filter(Boolean).join(" + ") || "Not yet packed"
+        : [semenSummary, directSummary, productSummary].filter(Boolean).join(" + ");
       return {
         id: o.id,
         order_date: o.order_date,

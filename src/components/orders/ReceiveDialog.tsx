@@ -55,6 +55,8 @@ interface ReceiveDialogProps {
   semenCompanyId: string | null;
   semenCompanyName: string | null;
   customerId: string | null;
+  /** For inventory orders: the company that owns the stock ('Select' | 'CATL' | company name). */
+  inventoryOwner?: string | null;
   items: ReceiveDialogItem[];
   onReceived: () => void;
 }
@@ -150,6 +152,7 @@ export default function ReceiveDialog({
   semenCompanyId,
   semenCompanyName,
   customerId,
+  inventoryOwner,
   items,
   onReceived,
 }: ReceiveDialogProps) {
@@ -307,7 +310,10 @@ export default function ReceiveDialog({
       const snapshot: Record<string, unknown> = {
         version: 1,
         draft_lines: v.draftLines,
-        inventory_owner: isInventory ? "CATL" : null,
+        // Use the order's actual inventory owner (Select / CATL / company); falling
+        // back to null lets confirm_shipment default to the shipment's semen company.
+        // (Previously hardcoded to "CATL", which mislabeled Select-owned stock.)
+        inventory_owner: isInventory ? (inventoryOwner ?? null) : null,
         semen_owner_id: !isInventory ? customerId : null,
         supplier_invoice_number: null,
       };
